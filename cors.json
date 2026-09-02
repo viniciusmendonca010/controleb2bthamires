@@ -1,0 +1,18 @@
+[
+  {
+    "origin": ["http://localhost:8123", "http://127.0.0.1:8123"],
+    "method": ["GET", "PUT", "POST", "DELETE", "HEAD"],
+    "maxAgeSeconds": 3600,
+    "responseHeader": [
+      "Content-Type",
+      "Authorization",
+      "Content-Length",
+      "X-Goog-Upload-Protocol",
+      "X-Goog-Upload-Command",
+      "X-Goog-Upload-URL",
+      "X-Goog-Upload-Status",
+      "X-Goog-Upload-Size-Received",
+      "X-Goog-Upload-Offset"
+    ]
+  }
+]
