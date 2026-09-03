@@ -109,6 +109,11 @@ const EMITENTE_BASE_DOCS = [
 /* ---------------- live data cache (populated by Firestore listeners) ---------------- */
 let db = { partners: [], requests: [], errors: [] };
 let listeners = [];
+// distinguishes "still waiting on the first snapshot" from "snapshot arrived,
+// there's just no partners/{uid} doc" — without this the partner screen can't
+// tell a transient load from a genuinely missing profile (e.g. one created by
+// hand in the console with the wrong document ID) and shows a spinner forever.
+let partnerProfileLoaded = false;
 function clearListeners() { listeners.forEach(u => u()); listeners = []; }
 
 /* ---------------- auth / session state ---------------- */
@@ -252,18 +257,24 @@ function attachAdminListeners() {
   }));
 }
 function attachPartnerListeners(uid) {
+  partnerProfileLoaded = false;
   listeners.push(fbDb.collection('partners').doc(uid).onSnapshot(doc => {
     db.partners = doc.exists ? [{ id: doc.id, ...doc.data() }] : [];
+    partnerProfileLoaded = true;
+    render();
+  }, err => {
+    partnerProfileLoaded = true;
+    toast('Não foi possível carregar seu cadastro: ' + err.message);
     render();
   }));
   listeners.push(fbDb.collection('requests').where('partnerId', '==', uid).onSnapshot(snap => {
     db.requests = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (b.updatedAt?.toMillis?.() || 0) - (a.updatedAt?.toMillis?.() || 0));
     render();
-  }));
+  }, err => toast('Não foi possível carregar suas solicitações: ' + err.message)));
   listeners.push(fbDb.collection('errors').where('partnerId', '==', uid).onSnapshot(snap => {
     db.errors = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
     render();
-  }));
+  }, err => toast('Não foi possível carregar seus relatos: ' + err.message)));
 }
 
 function currentPartner() { return db.partners[0] || null; }
@@ -719,7 +730,12 @@ function AdminControlPanel(r) {
 function PartnerRoot() {
   const p = ui.partner;
   const partner = currentPartner();
-  if (!partner) return `<div class="role-screen"><div class="box"><p class="lede">Carregando seu cadastro…</p></div></div>`;
+  if (!partner) {
+    const msg = partnerProfileLoaded
+      ? 'Não encontramos um cadastro vinculado a esta conta. Se você acabou de se cadastrar, aguarde alguns segundos e recarregue a página. Se o problema continuar, entre em contato com o suporte.'
+      : 'Carregando seu cadastro…';
+    return `<div class="role-screen"><div class="box"><p class="lede">${esc(msg)}</p></div></div>`;
+  }
   if (p.screen === 'request-detail') return RequestDetail(p.requestId, 'partner', null);
   if (p.screen === 'erros') return PartnerErros();
   return PartnerDashboard();
@@ -1190,10 +1206,21 @@ document.addEventListener('DOMContentLoaded', () => {
         ui.authBusy = true; ui.authError = ''; render();
         try {
           const cred = await fbAuth.createUserWithEmailAndPassword(email, pass);
-          await fbDb.collection('partners').doc(cred.user.uid).set({
-            name: nome, type: tipo, document: doc, email, whatsapp: whats,
-            relationshipStart: FieldValue.serverTimestamp(), lastUpdate: FieldValue.serverTimestamp(),
-          });
+          try {
+            await fbDb.collection('partners').doc(cred.user.uid).set({
+              name: nome, type: tipo, document: doc, email, whatsapp: whats,
+              relationshipStart: FieldValue.serverTimestamp(), lastUpdate: FieldValue.serverTimestamp(),
+            });
+          } catch (writeErr) {
+            // the login was created but the profile write failed — sign back out
+            // rather than leaving an orphaned account with no partners/{uid} doc,
+            // which would otherwise get stuck on "Carregando seu cadastro…" forever.
+            await fbAuth.signOut();
+            ui.authError = 'Não foi possível salvar seu cadastro. Tente novamente.';
+            ui.authBusy = false;
+            render();
+            break;
+          }
           toast('Cadastro criado com sucesso!');
         } catch (err) { ui.authError = friendlyAuthError(err); ui.authBusy = false; render(); }
         break;
