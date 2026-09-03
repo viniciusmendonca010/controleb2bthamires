@@ -26,6 +26,37 @@ function personType(documento) {
   if (digits.length === 14) return 'PJ';
   return null;
 }
+function isValidCPF(cpf) {
+  const s = (cpf || '').replace(/\D/g, '');
+  if (s.length !== 11 || /^(\d)\1{10}$/.test(s)) return false;
+  const digits = s.split('').map(Number);
+  const checkDigit = (len) => {
+    let sum = 0;
+    for (let i = 0; i < len; i++) sum += digits[i] * (len + 1 - i);
+    const rest = sum % 11;
+    return rest < 2 ? 0 : 11 - rest;
+  };
+  return checkDigit(9) === digits[9] && checkDigit(10) === digits[10];
+}
+function isValidCNPJ(cnpj) {
+  const s = (cnpj || '').replace(/\D/g, '');
+  if (s.length !== 14 || /^(\d)\1{13}$/.test(s)) return false;
+  const digits = s.split('').map(Number);
+  const checkDigit = (len) => {
+    const weights = len === 12 ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2] : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+    let sum = 0;
+    for (let i = 0; i < len; i++) sum += digits[i] * weights[i];
+    const rest = sum % 11;
+    return rest < 2 ? 0 : 11 - rest;
+  };
+  return checkDigit(12) === digits[12] && checkDigit(13) === digits[13];
+}
+function isValidDocumento(documento) {
+  const type = personType(documento);
+  if (type === 'PF') return isValidCPF(documento);
+  if (type === 'PJ') return isValidCNPJ(documento);
+  return false;
+}
 const FieldValue = firebase.firestore.FieldValue;
 
 /* ---------------- operation branding ---------------- */
@@ -129,7 +160,7 @@ function emitenteDocs(emitente) {
 function isFormComplete(draft) {
   if (!draft.operation || !draft.nome || !draft.documento || !draft.telefone || !draft.email) return false;
   const type = personType(draft.documento);
-  if (!type) return false;
+  if (!type || !isValidDocumento(draft.documento)) return false;
   const base = requiredBaseDocs(draft).filter(d => !d.optional);
   if (!base.every(d => draft.docs[d.key])) return false;
   if (type === 'PF') {
@@ -142,7 +173,7 @@ function isFormComplete(draft) {
     if (!n || n < 1) return false;
     for (let i = 0; i < n; i++) {
       const em = draft.emitentes[i];
-      if (!em || !em.nome || !em.cpf) return false;
+      if (!em || !em.nome || !em.cpf || !isValidCPF(em.cpf)) return false;
       if (!emitenteDocs(em).every(d => em.docs[d.key])) return false;
     }
   } else {
@@ -803,6 +834,8 @@ function renderModal() {
 function NovaSolicitacaoModal(draft) {
   const type = personType(draft.documento);
   const complete = isFormComplete(draft) && !draft.anyUploading;
+  const docDigits = (draft.documento || '').replace(/\D/g, '');
+  const docInvalid = (docDigits.length === 11 || docDigits.length === 14) && !isValidDocumento(draft.documento);
 
   const uploadSlot = (docKey, label, filesObj, extraAttrs = '', uploadingFlag = false) => {
     const file = filesObj[docKey];
@@ -827,7 +860,11 @@ function NovaSolicitacaoModal(draft) {
     </div>
     <div class="field"><label>Nome do Cliente ou Razão Social</label><input type="text" placeholder="Nome completo ou Razão Social" value="${esc(draft.nome)}" data-action="draft-field" data-field="nome"></div>
     <div class="form-grid-2">
-      <div class="field"><label>CPF ou CNPJ</label><input type="text" placeholder="000.000.000-00 ou 00.000.000/0000-00" value="${esc(draft.documento)}" data-action="draft-field" data-field="documento"></div>
+      <div class="field">
+        <label>CPF ou CNPJ</label>
+        <input type="text" placeholder="000.000.000-00 ou 00.000.000/0000-00" value="${esc(draft.documento)}" data-action="draft-field" data-field="documento">
+        ${docInvalid ? '<div style="color:var(--red);font-size:11.5px;margin-top:6px;">CPF/CNPJ inválido — confira os números digitados.</div>' : ''}
+      </div>
       <div class="field"><label>Telefone</label><input type="text" placeholder="(00) 00000-0000" value="${esc(draft.telefone)}" data-action="draft-field" data-field="telefone"></div>
     </div>
     <div class="field"><label>E-mail</label><input type="email" placeholder="email@exemplo.com" value="${esc(draft.email)}" data-action="draft-field" data-field="email"></div>
@@ -1047,7 +1084,19 @@ function emptyDraft() {
 }
 function emptyEmitente() { return { nome: '', cpf: '', email: '', telefone: '', profissao: '', icp: '', estadoCivil: '', docs: {}, docPaths: {}, uploading: {} }; }
 
+// mirrors the contentType/size constraints enforced server-side in storage.rules,
+// so users get an immediate, friendly message instead of a raw Firebase error
+// after the bytes have already been sent.
+function validateUploadFile(file) {
+  const allowed = ['application/pdf', 'image/jpeg', 'image/png'];
+  if (!allowed.includes(file.type)) return 'Formato não suportado. Envie PDF, JPG ou PNG.';
+  if (file.size > 15 * 1024 * 1024) return 'Arquivo muito grande (máximo 15MB).';
+  return null;
+}
+
 async function uploadDraftFile(file, key, emitenteIdx) {
+  const invalid = validateUploadFile(file);
+  if (invalid) { toast(invalid); return; }
   const draft = ui.modal.draft;
   const target = emitenteIdx === undefined ? draft : draft.emitentes[emitenteIdx];
   target.uploading[key] = true;
@@ -1072,6 +1121,10 @@ async function uploadDraftFile(file, key, emitenteIdx) {
    ============================================================ */
 document.addEventListener('DOMContentLoaded', () => {
   render();
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && ui.modal) { ui.modal = null; renderModal(); }
+  });
 
   document.body.addEventListener('click', async (e) => {
     const el = e.target.closest('[data-action]');
@@ -1130,6 +1183,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const pass2 = document.getElementById('cad-pass2').value;
         const tipo = document.querySelector('input[name="cad-tipo"]:checked').value;
         if (!nome || !doc || !email) { ui.authError = 'Preencha nome, documento e e-mail.'; render(); break; }
+        if (tipo === 'PF' && !isValidCPF(doc)) { ui.authError = 'CPF inválido. Confira os números digitados.'; render(); break; }
+        if (tipo === 'PJ' && !isValidCNPJ(doc)) { ui.authError = 'CNPJ inválido. Confira os números digitados.'; render(); break; }
         if (pass.length < 6) { ui.authError = 'A senha precisa ter ao menos 6 caracteres.'; render(); break; }
         if (pass !== pass2) { ui.authError = 'As senhas não coincidem.'; render(); break; }
         ui.authBusy = true; ui.authError = ''; render();
@@ -1347,6 +1402,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const draft = ui.modal.draft;
       draft.extraDocs = draft.extraDocs || [];
       for (const file of Array.from(el.files)) {
+        const invalid = validateUploadFile(file);
+        if (invalid) { toast(`${file.name}: ${invalid}`); continue; }
         const path = `documents/${authUser.uid}/${draft.id}/extra_${Date.now()}_${file.name}`;
         try { await fbStorage.ref(path).put(file); draft.extraDocs.push({ name: file.name, path }); }
         catch (err) { toast('Falha no upload de ' + file.name); }
@@ -1356,6 +1413,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (el.dataset.action === 'partner-upload-existing-doc') {
       const file = el.files[0];
       if (!file) return;
+      const invalid = validateUploadFile(file);
+      if (invalid) { toast(invalid); return; }
       const req = db.requests.find(r => r.id === el.dataset.req);
       const path = `documents/${authUser.uid}/${req.id}/${el.dataset.key}_${file.name}`;
       try {

@@ -40,7 +40,11 @@ service cloud.firestore {
     // admin allowlist — never writable from the client; add admins by hand
     // in the Firebase Console (Firestore Data tab), doc id = lowercase e-mail.
     match /admins/{email} {
-      allow read: if isSignedIn();
+      // get (checking whether YOUR OWN e-mail is an admin) stays open to any
+      // signed-in user — the app relies on this at login. list is admin-only
+      // so a partner account can't enumerate every admin's e-mail address.
+      allow get: if isSignedIn();
+      allow list: if isAdmin();
       allow write: if false;
     }
   }
