@@ -61,11 +61,14 @@ const FieldValue = firebase.firestore.FieldValue;
 
 /* ---------------- operation branding ---------------- */
 const OPERATIONS = {
-  'CERES AGROBANK': { label: 'Ceres AgroFinance', tag: 'AGROFINANCE' },
   'CERES CONFINAMENTO': { label: 'Ceres Confinamento', tag: 'CONFINAMENTO' },
   'CERES TRADING': { label: 'Ceres Trading', tag: 'TRADING' },
-  'HOME EQUITY/FARM EQUITY': { label: 'Home Equity/Farm Equity', tag: 'HOME EQUITY' },
+  'CERES AGROBANK': { label: 'Ceres AgroFinance', tag: 'AGROFINANCE' },
+  'CREDITO BTG PACTUAL': { label: 'Crédito BTG Pactual', tag: 'BTG PACTUAL' },
+  'CONSORCIO': { label: 'Consórcio', tag: 'CONSÓRCIO' },
 };
+// Ceres AgroFinance is the only operation with a required sub-type today.
+const AGROFINANCE_SUBTIPOS = ['Antecipação de Recebíveis', 'Semi-Estruturada', 'Estruturada'];
 const STATUS_META = {
   em_analise: { label: 'Em Análise', cls: 'analise' },
   aprovado: { label: 'Aprovado', cls: 'approved' },
@@ -164,6 +167,7 @@ function emitenteDocs(emitente) {
 }
 function isFormComplete(draft) {
   if (!draft.operation || !draft.nome || !draft.documento || !draft.telefone || !draft.email) return false;
+  if (draft.operation === 'CERES AGROBANK' && !draft.agroSubtipo) return false;
   const type = personType(draft.documento);
   if (!type || !isValidDocumento(draft.documento)) return false;
   const base = requiredBaseDocs(draft).filter(d => !d.optional);
@@ -636,6 +640,7 @@ function RequestDetail(requestId, mode, returnTo) {
       <div class="mono" style="color:var(--muted);font-size:11px;margin-bottom:10px;">ID: ${r.id}</div>
       <div class="brand-mark">${opMeta.tag}</div>
       <h2 class="serif">${esc(opMeta.label)}</h2>
+      ${f.agroSubtipo ? `<div class="mono" style="color:var(--muted);font-size:12px;margin-top:-10px;margin-bottom:14px;">${esc(f.agroSubtipo)}</div>` : ''}
       <div class="client-name serif">${esc(f.nome || '—')}</div>
       <div class="client-doc">${esc(f.documento || '—')}</div>
     </div>
@@ -874,6 +879,15 @@ function NovaSolicitacaoModal(draft) {
         ${Object.keys(OPERATIONS).map(k => `<option value="${k}" ${draft.operation === k ? 'selected' : ''}>${OPERATIONS[k].label}</option>`).join('')}
       </select>
     </div>
+    ${draft.operation === 'CERES AGROBANK' ? `
+      <div class="field">
+        <label>Subtipo Ceres AgroFinance</label>
+        <select data-action="draft-field" data-field="agroSubtipo">
+          <option value="">Selecione o Subtipo</option>
+          ${AGROFINANCE_SUBTIPOS.map(o => `<option ${draft.agroSubtipo === o ? 'selected' : ''}>${o}</option>`).join('')}
+        </select>
+      </div>
+    ` : ''}
     <div class="field"><label>Nome do Cliente ou Razão Social</label><input type="text" placeholder="Nome completo ou Razão Social" value="${esc(draft.nome)}" data-action="draft-field" data-field="nome"></div>
     <div class="form-grid-2">
       <div class="field">
@@ -1091,7 +1105,7 @@ function render() {
 function emptyDraft() {
   return {
     id: fbDb.collection('requests').doc().id, // pre-generated so uploads have a stable storage path
-    operation: '', nome: '', documento: '', telefone: '', email: '',
+    operation: '', agroSubtipo: '', nome: '', documento: '', telefone: '', email: '',
     profissao: '', icp: '', estadoCivil: '',
     subtipoOperacao: '', numeroSocios: '', infoSocios: '', possuiProcurador: '', infoProcurador: '', tipoPessoaMatricula: '',
     possuiAvalista: '', certidaoPFPJ: '', numeroEmitentes: '',
