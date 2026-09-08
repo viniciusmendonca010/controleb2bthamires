@@ -270,6 +270,70 @@ function buildChecklistDocuments(draft, profile) {
   return out;
 }
 
+/* ============================================================
+   COMMISSION ENGINE — Acordo de Parceria Comercial B2B GCI, Cláusula 3.
+   The contract's 4 product categories don't map 1:1 onto the app's 5
+   Tipo de Operação values (Confinamento, Crédito BTG Pactual and
+   Consórcio aren't named in the contract at all, and AgroFinance's
+   "Estruturada" subtipo could fall under 3.1.1 or 3.1.3) — so the
+   gestor always picks the category explicitly; we only pre-select it
+   for the one unambiguous case (Antecipação/Semi-Estruturada).
+   ============================================================ */
+function fmtBRL(n) {
+  return (Number(n) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+const COMMISSION_CATEGORIES = {
+  antecipacao_semi: { label: 'Antecipação de Recebíveis / Semi-Estruturada (cláusula 3.1.1)' },
+  estruturada: { label: 'Operação Estruturada — CRA/CRI/Debênture, Success Fee (cláusula 3.1.3)' },
+  graos_insumos: { label: 'Comercialização de Grãos e Insumos (cláusula 3.1.2)' },
+  nao_credito: { label: 'Operação Não-Crédito (cláusula 3.1.4)' },
+};
+const COMMISSION_GRAOS_RATES = { Soja: 0.0025, Milho: 0.005, Fertilizantes: 0.005 };
+
+function calculateCommission(cd) {
+  const num = (v) => Number(v) || 0;
+  if (cd.category === 'antecipacao_semi') {
+    const base = (num(cd.valorOperado) / 1000000) * 1000;
+    const bonusElegivel = !!cd.ativacaoNovoCliente && num(cd.valorOperado) >= 500000 && num(cd.prazoMeses) >= 6;
+    const bonus = bonusElegivel ? 3000 : 0;
+    return { total: base + bonus, base, bonus, bonusElegivel, parcela1: base / 2, parcela2: base / 2 };
+  }
+  if (cd.category === 'graos_insumos') {
+    const rate = COMMISSION_GRAOS_RATES[cd.produto] || 0;
+    return { total: num(cd.vop) * rate, rate };
+  }
+  if (cd.category === 'estruturada') {
+    const pct = Math.min(40, Math.max(0, num(cd.percentualParceiro)));
+    return { total: num(cd.successFee) * (pct / 100), pct };
+  }
+  if (cd.category === 'nao_credito') {
+    return { total: num(cd.receitaLiquida) * 0.30 };
+  }
+  return { total: 0 };
+}
+// true when no OTHER approved request in the system shares this client's
+// CPF/CNPJ — a reasonable data-driven default for the "novo cliente" bonus
+// eligibility, which the gestor can still override by hand.
+function suggestNovoCliente(r) {
+  const doc = r?.form?.documento;
+  if (!doc) return false;
+  return !db.requests.some(x => x.id !== r.id && x.form?.documento === doc && x.status === 'aprovado');
+}
+function initCommissionDraft(r) {
+  if (r?.commission) return { ...r.commission };
+  const suggestedCategory = (r?.operation === 'CERES AGROBANK' && ['Antecipação de Recebíveis', 'Semi-Estruturada'].includes(r?.form?.agroSubtipo))
+    ? 'antecipacao_semi'
+    : r?.operation === 'CERES TRADING' ? 'graos_insumos' : '';
+  return {
+    category: suggestedCategory,
+    valorOperado: '', ativacaoNovoCliente: suggestNovoCliente(r), prazoMeses: '',
+    produto: 'Soja', vop: '',
+    successFee: '', percentualParceiro: '',
+    receitaLiquida: '',
+    parcela1Paga: false, parcela2Paga: false, notaFiscalRecebida: false, aceiteEmitido: false,
+  };
+}
+
 /* ---------------- live data cache (populated by Firestore listeners) ---------------- */
 let db = { partners: [], requests: [], errors: [] };
 let listeners = [];
@@ -291,7 +355,7 @@ function initialUI() {
     authMode: 'login',       // 'login' | 'signup' (partner only)
     authError: '',
     authBusy: false,
-    admin: { tab: 'parceiros', search: '', statusFilter: 'all', drill: null },
+    admin: { tab: 'parceiros', search: '', statusFilter: 'all', drill: null, commissionDraft: null },
     partner: { screen: 'dashboard', requestId: null, search: '', filterOpen: false, statusFilter: 'all', operationFilter: 'all' },
     modal: null,
   };
@@ -876,7 +940,88 @@ function RequestDetail(requestId, mode, returnTo) {
       </div>
     `).join('')}
 
+    ${mode === 'partner' && r.commission ? `
+      <div class="subsection" style="margin-top:22px;">
+        <div class="eyebrow">Sua Comissão Nesta Operação</div>
+        <div style="font-size:22px;font-weight:800;margin:6px 0;">${fmtBRL(calculateCommission(r.commission).total)}</div>
+        <div style="font-size:12.5px;color:var(--muted);">${COMMISSION_CATEGORIES[r.commission.category]?.label || ''}</div>
+      </div>
+    ` : ''}
+
+    ${mode === 'admin' ? CommissionPanel(r) : ''}
     ${mode === 'admin' ? AdminControlPanel(r) : ''}
+  `;
+}
+
+function CommissionPanel(r) {
+  const cd = ui.admin.commissionDraft || initCommissionDraft(r);
+  const result = calculateCommission(cd);
+  const alreadySaved = !!r.commission;
+
+  const categoryFields = {
+    antecipacao_semi: `
+      <div class="form-grid-2">
+        <div class="field"><label>Valor Efetivamente Operado (R$)</label><input type="number" step="0.01" value="${esc(cd.valorOperado)}" data-action="commission-field" data-field="valorOperado"></div>
+        <div class="field"><label>Prazo da Operação (meses)</label><input type="number" value="${esc(cd.prazoMeses)}" data-action="commission-field" data-field="prazoMeses"></div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;margin:4px 0 14px;">
+        <input type="checkbox" data-action="commission-checkbox" data-field="ativacaoNovoCliente" ${cd.ativacaoNovoCliente ? 'checked' : ''}>
+        Cliente novo (nunca operou com a Ceres) — elegível ao bônus de ativação de R$ 3.000,00 se valor ≥ R$ 500.000 e prazo ≥ 6 meses
+      </label>
+    `,
+    graos_insumos: `
+      <div class="form-grid-2">
+        <div class="field"><label>Produto</label>
+          <select data-action="commission-field" data-field="produto">
+            ${Object.keys(COMMISSION_GRAOS_RATES).map(p => `<option ${cd.produto === p ? 'selected' : ''}>${p} (${(COMMISSION_GRAOS_RATES[p] * 100).toFixed(2)}% sobre VOP)</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>VOP — Volume da Operação (R$)</label><input type="number" step="0.01" value="${esc(cd.vop)}" data-action="commission-field" data-field="vop"></div>
+      </div>
+    `,
+    estruturada: `
+      <div class="form-grid-2">
+        <div class="field"><label>Success Fee recebido pela Ceres, líquido de impostos (R$)</label><input type="number" step="0.01" value="${esc(cd.successFee)}" data-action="commission-field" data-field="successFee"></div>
+        <div class="field"><label>% acordado com o Parceiro (até 40%)</label><input type="number" min="0" max="40" step="0.1" value="${esc(cd.percentualParceiro)}" data-action="commission-field" data-field="percentualParceiro"></div>
+      </div>
+    `,
+    nao_credito: `
+      <div class="field"><label>Receita Líquida auferida pela Ceres (R$)</label><input type="number" step="0.01" value="${esc(cd.receitaLiquida)}" data-action="commission-field" data-field="receitaLiquida"></div>
+    `,
+  };
+
+  return `
+    <div class="admin-panel" style="background:var(--surface);color:var(--ink);border:1px solid var(--border-c);">
+      <div class="section-label">💰 Comissão do Parceiro ${alreadySaved ? '<span class="badge sent" style="margin-left:8px;">Calculada</span>' : ''}</div>
+      <div class="field"><label>Categoria (Acordo de Parceria Comercial, Cláusula 3)</label>
+        <select data-action="commission-field" data-field="category">
+          <option value="">Selecione a categoria...</option>
+          ${Object.keys(COMMISSION_CATEGORIES).map(k => `<option value="${k}" ${cd.category === k ? 'selected' : ''}>${COMMISSION_CATEGORIES[k].label}</option>`).join('')}
+        </select>
+      </div>
+      ${cd.category ? categoryFields[cd.category] || '' : ''}
+      ${cd.category ? `
+        <div class="subsection" style="margin-top:4px;">
+          <div class="eyebrow">Comissão Calculada</div>
+          <div style="font-size:22px;font-weight:800;margin:4px 0;">${fmtBRL(result.total)}</div>
+          ${cd.category === 'antecipacao_semi' ? `
+            <div style="font-size:13px;color:var(--muted);">Base: ${fmtBRL(result.base)} · 50% no desembolso (${fmtBRL(result.parcela1)}) + 50% ao final (${fmtBRL(result.parcela2)})</div>
+            ${result.bonusElegivel ? `<div style="font-size:13px;color:var(--green);margin-top:4px;">+ Bônus de ativação: ${fmtBRL(result.bonus)}</div>` : ''}
+          ` : ''}
+        </div>
+        <div class="form-grid-2" style="margin-top:14px;">
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;"><input type="checkbox" data-action="commission-checkbox" data-field="notaFiscalRecebida" ${cd.notaFiscalRecebida ? 'checked' : ''}> Nota Fiscal recebida</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;"><input type="checkbox" data-action="commission-checkbox" data-field="aceiteEmitido" ${cd.aceiteEmitido ? 'checked' : ''}> Aceite emitido (cláusula 3.6)</label>
+          ${cd.category === 'antecipacao_semi' ? `
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;"><input type="checkbox" data-action="commission-checkbox" data-field="parcela1Paga" ${cd.parcela1Paga ? 'checked' : ''}> 1ª parcela paga (desembolso)</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;"><input type="checkbox" data-action="commission-checkbox" data-field="parcela2Paga" ${cd.parcela2Paga ? 'checked' : ''}> 2ª parcela paga (final)</label>
+          ` : `
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;"><input type="checkbox" data-action="commission-checkbox" data-field="parcela1Paga" ${cd.parcela1Paga ? 'checked' : ''}> Comissão paga</label>
+          `}
+        </div>
+        <button class="btn btn-primary btn-block" style="margin-top:14px;" data-action="save-commission" data-id="${r.id}">💾 Salvar Comissão</button>
+      ` : ''}
+    </div>
   `;
 }
 
@@ -1594,6 +1739,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       case 'open-request-detail':
         ui.admin.drill = { type: 'request-detail', id: el.dataset.id, returnTo: el.dataset.return === 'partner-profile' ? { type: 'partner-profile', id: el.dataset.returnId } : { type: 'pendencias' } };
+        ui.admin.commissionDraft = initCommissionDraft(db.requests.find(x => x.id === el.dataset.id));
         render();
         break;
       case 'open-error-modal': ui.modal = { type: 'error-detail', id: el.dataset.id }; renderModal(); break;
@@ -1625,6 +1771,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (newStatus) payload.status = newStatus;
         await fbDb.collection('requests').doc(r.id).update(payload);
         toast('Atualizações salvas.');
+        render();
+        break;
+      }
+      case 'save-commission': {
+        const cd = ui.admin.commissionDraft;
+        if (!cd.category) { toast('Selecione a categoria da comissão.'); break; }
+        await fbDb.collection('requests').doc(el.dataset.id).update({
+          commission: cd,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        toast('Comissão salva.');
         render();
         break;
       }
@@ -1723,6 +1880,10 @@ document.addEventListener('DOMContentLoaded', () => {
       ui.modal.draft.socios[idx][el.dataset.field] = el.value;
       focusPreservingRender(renderModal);
     }
+    if (el.dataset.action === 'commission-field') {
+      ui.admin.commissionDraft[el.dataset.field] = el.value;
+      focusPreservingRender(renderPartial);
+    }
   });
 
   document.body.addEventListener('change', async (e) => {
@@ -1730,6 +1891,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (el.dataset.action === 'admin-status-filter') { ui.admin.statusFilter = el.value; renderPartial(); }
     if (el.dataset.action === 'partner-filter-status') { ui.partner.statusFilter = el.value; renderPartial(); }
     if (el.dataset.action === 'partner-filter-operation') { ui.partner.operationFilter = el.value; renderPartial(); }
+    if (el.dataset.action === 'commission-field') { ui.admin.commissionDraft[el.dataset.field] = el.value; renderPartial(); }
+    if (el.dataset.action === 'commission-checkbox') { ui.admin.commissionDraft[el.dataset.field] = el.checked; renderPartial(); }
 
     if (el.dataset.action === 'draft-field') {
       ui.modal.draft[el.dataset.field] = el.value;
