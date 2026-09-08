@@ -109,6 +109,167 @@ const EMITENTE_BASE_DOCS = [
   { key: 'comp_residencia', label: 'Comprovante de Residência' },
 ];
 
+/* ============================================================
+   CHECKLIST ENGINE — per operação/subtipo/pessoa document & field
+   requirements, sourced from "CHECKLIST GCI.xlsx" (Ceres team).
+   Covers Ceres Confinamento, Ceres Trading and Ceres AgroFinance;
+   Crédito BTG Pactual and Consórcio have no checklist defined yet
+   and keep using the generic PF/PJ_DOCS flow above.
+   ============================================================ */
+const CK_DOCS = {
+  carta_bacen: { key: 'carta_bacen', label: 'Carta Bacen/SCR (modelo Ceres)' },
+  relatorio_visita: { key: 'relatorio_visita', label: 'Relatório de Visita (Parceiro – manter arquivo editável)' },
+  contrato_social: { key: 'contrato_social', label: 'Última alteração do Contrato Social (se Limitada) ou do Estatuto Social' },
+  certidao_simplificada_jc: { key: 'certidao_simplificada_jc', label: 'Certidão simplificada emitida pela Junta Comercial (validade 30 dias)' },
+  cartao_cnpj: { key: 'cartao_cnpj', label: 'Cartão de inscrição no CNPJ' },
+  inscricao_estadual: { key: 'inscricao_estadual', label: 'Inscrição Estadual (se aplicável)', optional: true },
+  inscricao_municipal: { key: 'inscricao_municipal', label: 'Inscrição Municipal (se aplicável)', optional: true },
+  df_2022: { key: 'df_2022', label: 'DF 2022 (Balanço, DRE e Faturamento)' },
+  df_2023: { key: 'df_2023', label: 'DF 2023 (Balanço, DRE e Faturamento)' },
+  df_2024: { key: 'df_2024', label: 'DF 2024 (Balanço, DRE e Faturamento)' },
+  df_2025: { key: 'df_2025', label: 'DF 2025 (Balanço, DRE e Faturamento)' },
+  organograma: { key: 'organograma', label: 'Organograma societário' },
+  endividamento_empresa: { key: 'endividamento_empresa', label: 'Endividamento calendarizado da empresa' },
+  planilha_confina: { key: 'planilha_confina', label: 'Planilha Produtor Agrícola/Confina (modelo Ceres)' },
+  curva_abc_cliente: { key: 'curva_abc_cliente', label: 'Curva ABC Cliente' },
+  curva_abc_fornecedor: { key: 'curva_abc_fornecedor', label: 'Curva ABC Fornecedor' },
+  apresentacao_institucional: { key: 'apresentacao_institucional', label: 'Apresentação Institucional ou Descrição da Companhia' },
+  abertura_receita: { key: 'abertura_receita', label: 'Abertura de receita (preço, quantidade e margem de contribuição por linha)' },
+  projecao_operacao: { key: 'projecao_operacao', label: 'Projeção — período da operação proposta' },
+
+  doc_pessoal: { key: 'doc_pessoal', label: 'Documentos pessoais (CNH, RG ou CRNM) — cópias legíveis' },
+  comp_residencia: { key: 'comp_residencia', label: 'Comprovante de residência (luz, gás e/ou água) — validade 60 dias' },
+  irpf: { key: 'irpf', label: 'IRPF (ano base anterior), declaração completa + recibo' },
+  endividamento_pf: { key: 'endividamento_pf', label: 'Endividamento calendarizado' },
+  certidao_casamento_nasc: { key: 'certidao_casamento_nasc', label: 'Certidão de Casamento ou Certidão de Nascimento' },
+  lcdpr: { key: 'lcdpr', label: 'LCDPR (Livro Caixa Digital do Produtor Rural), de 2022 até hoje' },
+  planilha_quadro_safra: { key: 'planilha_quadro_safra', label: 'Planilha Produtor Agrícola / Quadro safra' },
+
+  matricula_imovel: { key: 'matricula_imovel', label: 'Certidão de Matrícula do Imóvel (Registro Geral, Livro 2) — validade 30 dias' },
+  penhor: { key: 'penhor', label: 'Certidão de Penhor e/ou Alienação Fiduciária (Registro Auxiliar, Livro 3) — validade 10 dias' },
+  car_kml: { key: 'car_kml', label: 'CAR e KML das áreas dadas em garantia' },
+  arrendamento: { key: 'arrendamento', label: 'Contrato de Arrendamento, Comodato e/ou similares (quando aplicável)', optional: true },
+  anuencia: { key: 'anuencia', label: 'Termo de anuência do proprietário para alienação fiduciária e penhor agrícola' },
+  doc_proprietarios: { key: 'doc_proprietarios', label: 'Documentos pessoais dos proprietários do imóvel, caso os emitentes não sejam os proprietários', optional: true },
+  registro_b3_cpr: { key: 'registro_b3_cpr', label: 'Documento de registro B3 e registro em cartório da CPR (quando aplicável)', optional: true },
+
+  procuracao: { key: 'procuracao', label: 'Procuração pública ou procuração privada com firma reconhecida' },
+  doc_pessoal_procurador: { key: 'doc_pessoal_procurador', label: 'Documentos pessoais do procurador (CNH, RG e CPF) — cópias legíveis' },
+  comp_residencia_procurador: { key: 'comp_residencia_procurador', label: 'Comprovante de residência do procurador — validade 60 dias' },
+
+  ir_socio: { key: 'ir_socio', label: 'IR do sócio/avalista (ano base anterior), declaração completa + recibo' },
+  conjuge_doc_pessoal: { key: 'conjuge_doc_pessoal', label: 'Documentos pessoais do cônjuge/avalista (CNH, RG ou CRNM)' },
+};
+function ck(...keys) { return keys.map(k => CK_DOCS[k]); }
+const CK_IMOVEL_DOCS = ck('matricula_imovel', 'penhor', 'car_kml', 'arrendamento', 'anuencia', 'doc_proprietarios', 'registro_b3_cpr');
+const CK_PROCURADOR_DOCS = ck('procuracao', 'doc_pessoal_procurador', 'comp_residencia_procurador');
+const CK_SOCIO_DOCS = ck('doc_pessoal', 'comp_residencia', 'certidao_casamento_nasc', 'ir_socio');
+
+const AGRO_PJ_BASE_DOCS = ck('carta_bacen', 'relatorio_visita', 'contrato_social', 'cartao_cnpj', 'inscricao_estadual', 'inscricao_municipal', 'df_2022', 'df_2023', 'df_2024', 'df_2025', 'organograma', 'endividamento_empresa', 'curva_abc_cliente', 'curva_abc_fornecedor');
+
+const COVERED_OPERATIONS = ['CERES AGROBANK', 'CERES CONFINAMENTO', 'CERES TRADING'];
+const CHECKLISTS = {
+  AGRO_ANTECIPACAO_PJ: {
+    fields: ['enderecoInstitucional'], docs: AGRO_PJ_BASE_DOCS,
+    hasSocios: true, hasProcurador: true, hasImovel: false,
+  },
+  AGRO_ESTRUTURADA_PJ: {
+    fields: ['enderecoInstitucional'], docs: [...AGRO_PJ_BASE_DOCS, ...ck('apresentacao_institucional', 'abertura_receita', 'projecao_operacao')],
+    hasSocios: true, hasProcurador: true, hasImovel: false,
+  },
+  AGRO_PF: {
+    fields: ['icp'], docs: ck('carta_bacen', 'relatorio_visita', 'doc_pessoal', 'comp_residencia', 'irpf', 'endividamento_pf', 'certidao_casamento_nasc', 'lcdpr', 'planilha_quadro_safra'),
+    hasSocios: false, hasProcurador: false, hasImovel: false,
+  },
+  CONFINA_PJ: {
+    fields: ['enderecoInstitucional'], docs: ck('carta_bacen', 'relatorio_visita', 'contrato_social', 'certidao_simplificada_jc', 'cartao_cnpj', 'inscricao_estadual', 'inscricao_municipal', 'df_2022', 'df_2023', 'df_2024', 'df_2025', 'endividamento_empresa', 'organograma', 'planilha_confina'),
+    hasSocios: true, hasProcurador: false, hasImovel: true,
+  },
+  CONFINA_PF: {
+    fields: ['icp'], docs: ck('carta_bacen', 'relatorio_visita', 'doc_pessoal', 'comp_residencia', 'irpf', 'endividamento_pf', 'certidao_casamento_nasc', 'planilha_confina'),
+    hasSocios: false, hasProcurador: false, hasImovel: true,
+  },
+  TRADING_PJ: {
+    fields: ['enderecoInstitucional'], docs: ck('carta_bacen', 'relatorio_visita', 'contrato_social', 'certidao_simplificada_jc', 'cartao_cnpj', 'inscricao_estadual', 'inscricao_municipal', 'df_2022', 'df_2023', 'df_2024', 'df_2025', 'endividamento_empresa', 'planilha_confina', 'organograma'),
+    hasSocios: true, hasProcurador: true, hasImovel: true,
+  },
+  TRADING_PF: {
+    fields: ['icp'], docs: ck('carta_bacen', 'relatorio_visita', 'doc_pessoal', 'comp_residencia', 'irpf', 'endividamento_pf', 'certidao_casamento_nasc', 'planilha_confina'),
+    hasSocios: false, hasProcurador: false, hasImovel: true,
+  },
+};
+function resolveProfile(draft) {
+  if (draft.operation === 'CERES AGROBANK') {
+    if (draft.tipoPessoa === 'PF') return 'AGRO_PF';
+    if (draft.tipoPessoa === 'PJ') {
+      if (draft.agroSubtipo === 'Antecipação de Recebíveis') return 'AGRO_ANTECIPACAO_PJ';
+      if (draft.agroSubtipo === 'Semi-Estruturada' || draft.agroSubtipo === 'Estruturada') return 'AGRO_ESTRUTURADA_PJ';
+    }
+    return null;
+  }
+  if (draft.operation === 'CERES CONFINAMENTO') return draft.tipoPessoa === 'PF' ? 'CONFINA_PF' : draft.tipoPessoa === 'PJ' ? 'CONFINA_PJ' : null;
+  if (draft.operation === 'CERES TRADING') return draft.tipoPessoa === 'PF' ? 'TRADING_PF' : draft.tipoPessoa === 'PJ' ? 'TRADING_PJ' : null;
+  return null; // Crédito BTG Pactual / Consórcio: no checklist yet, uses the generic PF/PJ flow
+}
+function isValidDocumentoForTipo(documento, tipoPessoa) {
+  if (tipoPessoa === 'PF') return isValidCPF(documento);
+  if (tipoPessoa === 'PJ') return isValidCNPJ(documento);
+  return isValidDocumento(documento);
+}
+function isChecklistComplete(draft, profile) {
+  if (profile.fields.includes('enderecoInstitucional') && !draft.enderecoInstitucional) return false;
+  if (profile.fields.includes('icp') && (!draft.profissao || !draft.icp)) return false;
+  if (!profile.docs.filter(d => !d.optional).every(d => draft.docs[d.key])) return false;
+
+  if (profile.hasImovel) {
+    if (!draft.certidaoPFPJ) return false;
+    if (!CK_IMOVEL_DOCS.filter(d => !d.optional).every(d => draft.docs[d.key])) return false;
+    const n = parseInt(draft.numeroEmitentes || '0', 10);
+    if (!n || n < 1) return false;
+    for (let i = 0; i < n; i++) {
+      const em = draft.emitentes[i];
+      if (!em || !em.nome || !em.cpf || !isValidCPF(em.cpf) || !em.docs.doc_pessoal) return false;
+    }
+  }
+  if (profile.hasSocios) {
+    const n = parseInt(draft.numeroSocios || '0', 10);
+    if (!n || n < 1) return false;
+    for (let i = 0; i < n; i++) {
+      const s = draft.socios[i];
+      if (!s || !s.nome || !s.cpf || !isValidCPF(s.cpf) || !s.profissao) return false;
+      if (!CK_SOCIO_DOCS.every(d => s.docs[d.key])) return false;
+    }
+  }
+  if (profile.hasProcurador && draft.possuiProcurador === 'Sim' && !CK_PROCURADOR_DOCS.every(d => draft.docs[d.key])) return false;
+  if (!draft.temConjugeAvalista) return false;
+  if (draft.temConjugeAvalista === 'Sim' && (!draft.conjugeProfissao || !draft.conjugeContato || !draft.docs.conjuge_doc_pessoal)) return false;
+  return true;
+}
+function buildChecklistDocuments(draft, profile) {
+  const out = [];
+  const push = (d) => out.push({ ...d, status: draft.docs[d.key] ? 'enviado' : 'pendente', fileName: draft.docs[d.key] || null, storagePath: draft.docPaths[d.key] || null });
+  profile.docs.forEach(push);
+  if (profile.hasImovel) {
+    CK_IMOVEL_DOCS.forEach(push);
+    const n = parseInt(draft.numeroEmitentes || '0', 10) || 0;
+    for (let i = 0; i < n; i++) {
+      const em = draft.emitentes[i] || { nome: '', docs: {}, docPaths: {} };
+      out.push({ key: 'em_doc_pessoal_' + i, label: `Documentos pessoais — Emitente ${i + 1} (${em.nome || '—'})`, status: em.docs.doc_pessoal ? 'enviado' : 'pendente', fileName: em.docs.doc_pessoal || null, storagePath: (em.docPaths || {}).doc_pessoal || null });
+    }
+  }
+  if (profile.hasSocios) {
+    const n = parseInt(draft.numeroSocios || '0', 10) || 0;
+    for (let i = 0; i < n; i++) {
+      const s = draft.socios[i] || { nome: '', docs: {}, docPaths: {} };
+      CK_SOCIO_DOCS.forEach(d => out.push({ key: d.key + '_socio' + i, label: `${d.label} — Sócio ${i + 1} (${s.nome || '—'})`, status: s.docs[d.key] ? 'enviado' : 'pendente', fileName: s.docs[d.key] || null, storagePath: (s.docPaths || {})[d.key] || null }));
+    }
+  }
+  if (profile.hasProcurador && draft.possuiProcurador === 'Sim') CK_PROCURADOR_DOCS.forEach(push);
+  if (draft.temConjugeAvalista === 'Sim') push(CK_DOCS.conjuge_doc_pessoal);
+  (draft.extraDocs || []).forEach((f, i) => out.push({ key: 'extra_' + i, label: `Documento adicional: ${f.name}`, status: 'enviado', fileName: f.name, storagePath: f.path }));
+  return out;
+}
+
 /* ---------------- live data cache (populated by Firestore listeners) ---------------- */
 let db = { partners: [], requests: [], errors: [] };
 let listeners = [];
@@ -168,6 +329,13 @@ function emitenteDocs(emitente) {
 function isFormComplete(draft) {
   if (!draft.operation || !draft.nome || !draft.documento || !draft.telefone || !draft.email) return false;
   if (draft.operation === 'CERES AGROBANK' && !draft.agroSubtipo) return false;
+
+  if (COVERED_OPERATIONS.includes(draft.operation)) {
+    if (!draft.tipoPessoa || !isValidDocumentoForTipo(draft.documento, draft.tipoPessoa)) return false;
+    const profileKey = resolveProfile(draft);
+    return !!profileKey && isChecklistComplete(draft, CHECKLISTS[profileKey]);
+  }
+
   const type = personType(draft.documento);
   if (!type || !isValidDocumento(draft.documento)) return false;
   const base = requiredBaseDocs(draft).filter(d => !d.optional);
@@ -191,6 +359,9 @@ function isFormComplete(draft) {
   return true;
 }
 function buildDocumentsFromDraft(draft) {
+  const profileKey = resolveProfile(draft);
+  if (profileKey) return buildChecklistDocuments(draft, CHECKLISTS[profileKey]);
+
   const type = personType(draft.documento);
   const out = [];
   requiredBaseDocs(draft).forEach(d => out.push({ ...d, status: draft.docs[d.key] ? 'enviado' : 'pendente', fileName: draft.docs[d.key] || null, storagePath: draft.docPaths[d.key] || null }));
@@ -654,7 +825,7 @@ function RequestDetail(requestId, mode, returnTo) {
         <div class="field"><label>E-mail</label><input type="text" value="${esc(f.email || '')}" disabled></div>
         <div class="field"><label>Informações Adicionais (Parceiro)</label><input type="text" value="${esc(f.obs || 'N/A')}" disabled></div>
       </div>
-      ${personType(f.documento) === 'PJ' ? `
+      ${(f.tipoPessoa || personType(f.documento)) === 'PJ' ? `
         <div class="form-grid-2">
           <div class="field"><label>Subtipo de Operação</label><input type="text" value="${esc(f.subtipoOperacao || 'N/A')}" disabled></div>
           <div class="field"><label>Número de Sócios</label><input type="text" value="${esc(f.numeroSocios || 'N/A')}" disabled></div>
@@ -673,6 +844,17 @@ function RequestDetail(requestId, mode, returnTo) {
           <div class="field"><label>Possui Avalista?</label><input type="text" value="${esc(f.possuiAvalista || 'N/A')}" disabled></div>
         </div>
       `}
+      ${f.enderecoInstitucional ? `
+        <div class="form-grid-2">
+          <div class="field"><label>Endereço Institucional</label><input type="text" value="${esc(f.enderecoInstitucional)}" disabled></div>
+        </div>
+      ` : ''}
+      ${f.temConjugeAvalista ? `
+        <div class="form-grid-2">
+          <div class="field"><label>Possui Cônjuge/Avalista?</label><input type="text" value="${esc(f.temConjugeAvalista)}" disabled></div>
+          <div class="field"><label>Profissão do Cônjuge/Avalista</label><input type="text" value="${esc(f.conjugeProfissao || 'N/A')}" disabled></div>
+        </div>
+      ` : ''}
     </div>
 
     <div class="section-label">Documentos anexados</div>
@@ -852,11 +1034,122 @@ function renderModal() {
   else if (ui.modal.type === 'error-detail') root.innerHTML = ErrorDetailModal(ui.modal.id);
 }
 
+function ChecklistFormFields(draft, profile, uploadSlot) {
+  let html = '<div class="section-divider"></div><div class="section-label">Dados Adicionais</div>';
+
+  if (profile.fields.includes('enderecoInstitucional')) {
+    html += `<div class="field"><label>Endereço Institucional da Empresa</label><input type="text" placeholder="Endereço completo" value="${esc(draft.enderecoInstitucional)}" data-action="draft-field" data-field="enderecoInstitucional"></div>`;
+  }
+  if (profile.fields.includes('icp')) {
+    html += `
+      <div class="form-grid-2">
+        <div class="field"><label>Profissão</label><input type="text" value="${esc(draft.profissao)}" data-action="draft-field" data-field="profissao"></div>
+        <div class="field"><label>Possui ICP para assinatura?</label>
+          <select data-action="draft-field" data-field="icp">
+            <option value="">Selecione...</option><option ${draft.icp === 'Sim' ? 'selected' : ''}>Sim</option><option ${draft.icp === 'Não' ? 'selected' : ''}>Não</option>
+          </select>
+        </div>
+      </div>
+    `;
+  }
+
+  html += '<div class="section-divider"></div><div class="section-label">Anexar Documentos Obrigatórios</div>';
+  html += profile.docs.map(d => uploadSlot(d.key, d.label + (d.optional ? ' (opcional)' : ''), draft.docs, '', draft.uploading[d.key])).join('');
+
+  if (profile.hasSocios) {
+    html += `
+      <div class="section-divider"></div>
+      <div class="section-label">Sócios</div>
+      <div class="field"><label>Número de Sócios <span class="req">*</span></label><input type="number" min="1" value="${esc(draft.numeroSocios)}" data-action="draft-field" data-field="numeroSocios"></div>
+      ${(draft.socios || []).map((s, i) => `
+        <div class="subsection">
+          <div class="section-label">Sócio ${i + 1}</div>
+          <div class="field"><label>Nome</label><input type="text" value="${esc(s.nome)}" data-action="draft-socio-field" data-idx="${i}" data-field="nome"></div>
+          <div class="form-grid-2">
+            <div class="field"><label>CPF</label><input type="text" value="${esc(s.cpf)}" data-action="draft-socio-field" data-idx="${i}" data-field="cpf"></div>
+            <div class="field"><label>Profissão</label><input type="text" value="${esc(s.profissao)}" data-action="draft-socio-field" data-idx="${i}" data-field="profissao"></div>
+          </div>
+          <div class="form-grid-2">
+            <div class="field"><label>E-mail</label><input type="email" value="${esc(s.email)}" data-action="draft-socio-field" data-idx="${i}" data-field="email"></div>
+            <div class="field"><label>Telefone</label><input type="text" value="${esc(s.telefone)}" data-action="draft-socio-field" data-idx="${i}" data-field="telefone"></div>
+          </div>
+          <div class="section-label">Documentos do Sócio ${i + 1}</div>
+          ${CK_SOCIO_DOCS.map(d => uploadSlot(d.key, d.label, s.docs, `data-group="socios" data-idx="${i}"`, (s.uploading || {})[d.key])).join('')}
+        </div>
+      `).join('')}
+    `;
+  }
+
+  if (profile.hasProcurador) {
+    html += `
+      <div class="section-divider"></div>
+      <div class="field"><label>Possui Procurador?</label>
+        <select data-action="draft-field" data-field="possuiProcurador">
+          <option value="">Selecione...</option><option ${draft.possuiProcurador === 'Sim' ? 'selected' : ''}>Sim</option><option ${draft.possuiProcurador === 'Não' ? 'selected' : ''}>Não</option>
+        </select>
+      </div>
+      ${draft.possuiProcurador === 'Sim' ? `
+        <div class="field"><label>Informações do Procurador</label><textarea data-action="draft-field" data-field="infoProcurador">${esc(draft.infoProcurador)}</textarea></div>
+        <div class="section-label">Documentos do Procurador</div>
+        ${CK_PROCURADOR_DOCS.map(d => uploadSlot(d.key, d.label, draft.docs, '', draft.uploading[d.key])).join('')}
+      ` : ''}
+    `;
+  }
+
+  html += `
+    <div class="section-divider"></div>
+    <div class="field"><label>Sócio(s)/titular possui cônjuge ou avalista? <span class="req">*</span></label>
+      <select data-action="draft-field" data-field="temConjugeAvalista">
+        <option value="">Selecione...</option><option ${draft.temConjugeAvalista === 'Sim' ? 'selected' : ''}>Sim</option><option ${draft.temConjugeAvalista === 'Não' ? 'selected' : ''}>Não</option>
+      </select>
+    </div>
+    ${draft.temConjugeAvalista === 'Sim' ? `
+      <div class="section-label">Cônjuges e Avalistas</div>
+      <div class="form-grid-2">
+        <div class="field"><label>Profissão</label><input type="text" value="${esc(draft.conjugeProfissao)}" data-action="draft-field" data-field="conjugeProfissao"></div>
+        <div class="field"><label>E-mail e telefone</label><input type="text" value="${esc(draft.conjugeContato)}" data-action="draft-field" data-field="conjugeContato"></div>
+      </div>
+      ${uploadSlot('conjuge_doc_pessoal', CK_DOCS.conjuge_doc_pessoal.label, draft.docs, '', draft.uploading['conjuge_doc_pessoal'])}
+    ` : ''}
+  `;
+
+  if (profile.hasImovel) {
+    html += `
+      <div class="section-divider"></div>
+      <div class="section-label">Imóvel (Fazenda)</div>
+      ${CK_IMOVEL_DOCS.map(d => uploadSlot(d.key, d.label + (d.optional ? ' (opcional)' : ''), draft.docs, '', draft.uploading[d.key])).join('')}
+      <div class="field"><label>A certidão é emitida em nome de Pessoa Física ou Jurídica? <span class="req">*</span></label>
+        <select data-action="draft-field" data-field="certidaoPFPJ">
+          <option value="">Selecione...</option><option ${draft.certidaoPFPJ === 'Pessoa Física' ? 'selected' : ''}>Pessoa Física</option><option ${draft.certidaoPFPJ === 'Pessoa Jurídica' ? 'selected' : ''}>Pessoa Jurídica</option>
+        </select>
+      </div>
+      ${draft.certidaoPFPJ ? `
+        <div class="field"><label>Número de Emitentes <span class="req">*</span></label><input type="number" min="1" value="${esc(draft.numeroEmitentes)}" data-action="draft-field" data-field="numeroEmitentes"></div>
+        ${(draft.emitentes || []).map((em, i) => `
+          <div class="subsection">
+            <div class="section-label">Emitente ${i + 1} (e seu cônjuge)</div>
+            <div class="form-grid-2">
+              <div class="field"><label>Nome do Emitente</label><input type="text" value="${esc(em.nome)}" data-action="draft-emitente-field" data-idx="${i}" data-field="nome"></div>
+              <div class="field"><label>CPF do Emitente</label><input type="text" value="${esc(em.cpf)}" data-action="draft-emitente-field" data-idx="${i}" data-field="cpf"></div>
+            </div>
+            <div class="section-label">Documentos pessoais do Emitente ${i + 1}</div>
+            ${uploadSlot('doc_pessoal', 'Documentos pessoais (CNH, RG ou CRNM)', em.docs, `data-group="emitentes" data-idx="${i}"`, (em.uploading || {}).doc_pessoal)}
+          </div>
+        `).join('')}
+      ` : ''}
+    `;
+  }
+
+  return html;
+}
+
 function NovaSolicitacaoModal(draft) {
-  const type = personType(draft.documento);
+  const covered = COVERED_OPERATIONS.includes(draft.operation);
+  const type = covered ? draft.tipoPessoa : personType(draft.documento);
+  const profile = covered ? CHECKLISTS[resolveProfile(draft)] : null;
   const complete = isFormComplete(draft) && !draft.anyUploading;
   const docDigits = (draft.documento || '').replace(/\D/g, '');
-  const docInvalid = (docDigits.length === 11 || docDigits.length === 14) && !isValidDocumento(draft.documento);
+  const docInvalid = (docDigits.length === 11 || docDigits.length === 14) && !isValidDocumentoForTipo(draft.documento, type);
 
   const uploadSlot = (docKey, label, filesObj, extraAttrs = '', uploadingFlag = false) => {
     const file = filesObj[docKey];
@@ -888,6 +1181,15 @@ function NovaSolicitacaoModal(draft) {
         </select>
       </div>
     ` : ''}
+    ${covered ? `
+      <div class="field">
+        <label>Tipo de Pessoa</label>
+        <div class="radio-row">
+          <label><input type="radio" name="ns-tipo-pessoa" value="PJ" data-action="draft-field" data-field="tipoPessoa" ${draft.tipoPessoa === 'PJ' ? 'checked' : ''}> Pessoa Jurídica (CNPJ)</label>
+          <label><input type="radio" name="ns-tipo-pessoa" value="PF" data-action="draft-field" data-field="tipoPessoa" ${draft.tipoPessoa === 'PF' ? 'checked' : ''}> Pessoa Física (CPF)</label>
+        </div>
+      </div>
+    ` : ''}
     <div class="field"><label>Nome do Cliente ou Razão Social</label><input type="text" placeholder="Nome completo ou Razão Social" value="${esc(draft.nome)}" data-action="draft-field" data-field="nome"></div>
     <div class="form-grid-2">
       <div class="field">
@@ -900,7 +1202,9 @@ function NovaSolicitacaoModal(draft) {
     <div class="field"><label>E-mail</label><input type="email" placeholder="email@exemplo.com" value="${esc(draft.email)}" data-action="draft-field" data-field="email"></div>
   `;
 
-  if (type === 'PJ') {
+  if (covered) {
+    if (profile) body += ChecklistFormFields(draft, profile, uploadSlot);
+  } else if (type === 'PJ') {
     body += `
       <div class="section-divider"></div>
       <div class="section-label">Informações Adicionais (Pessoa Jurídica)</div>
@@ -993,7 +1297,7 @@ function NovaSolicitacaoModal(draft) {
               </div>
             </div>
             <div class="section-label">Anexar Documentos Obrigatórios do Emitente ${i + 1}</div>
-            ${emitenteDocs(em).map(d => uploadSlot(d.key, d.label, em.docs, `data-emitente="${i}"`, (em.uploading || {})[d.key])).join('')}
+            ${emitenteDocs(em).map(d => uploadSlot(d.key, d.label, em.docs, `data-group="emitentes" data-idx="${i}"`, (em.uploading || {})[d.key])).join('')}
           </div>
         `).join('')}
       ` : ''}
@@ -1105,14 +1409,16 @@ function render() {
 function emptyDraft() {
   return {
     id: fbDb.collection('requests').doc().id, // pre-generated so uploads have a stable storage path
-    operation: '', agroSubtipo: '', nome: '', documento: '', telefone: '', email: '',
-    profissao: '', icp: '', estadoCivil: '',
+    operation: '', agroSubtipo: '', tipoPessoa: '', nome: '', documento: '', telefone: '', email: '',
+    profissao: '', icp: '', estadoCivil: '', enderecoInstitucional: '',
     subtipoOperacao: '', numeroSocios: '', infoSocios: '', possuiProcurador: '', infoProcurador: '', tipoPessoaMatricula: '',
     possuiAvalista: '', certidaoPFPJ: '', numeroEmitentes: '',
-    emitentes: [], obs: '', docs: {}, docPaths: {}, uploading: {}, extraDocs: [], anyUploading: false,
+    temConjugeAvalista: '', conjugeProfissao: '', conjugeContato: '',
+    emitentes: [], socios: [], obs: '', docs: {}, docPaths: {}, uploading: {}, extraDocs: [], anyUploading: false,
   };
 }
 function emptyEmitente() { return { nome: '', cpf: '', email: '', telefone: '', profissao: '', icp: '', estadoCivil: '', docs: {}, docPaths: {}, uploading: {} }; }
+function emptySocio() { return { nome: '', cpf: '', profissao: '', email: '', telefone: '', docs: {}, docPaths: {}, uploading: {} }; }
 
 // mirrors the contentType/size constraints enforced server-side in storage.rules,
 // so users get an immediate, friendly message instead of a raw Firebase error
@@ -1124,16 +1430,16 @@ function validateUploadFile(file) {
   return null;
 }
 
-async function uploadDraftFile(file, key, emitenteIdx) {
+async function uploadDraftFile(file, key, groupKey, idx) {
   const invalid = validateUploadFile(file);
   if (invalid) { toast(invalid); return; }
   const draft = ui.modal.draft;
-  const target = emitenteIdx === undefined ? draft : draft.emitentes[emitenteIdx];
+  const target = groupKey === undefined ? draft : draft[groupKey][idx];
   target.uploading[key] = true;
   draft.anyUploading = true;
   renderModal();
   try {
-    const path = `documents/${authUser.uid}/${draft.id}/${key}${emitenteIdx !== undefined ? '_em' + emitenteIdx : ''}_${file.name}`;
+    const path = `documents/${authUser.uid}/${draft.id}/${key}${groupKey !== undefined ? '_' + groupKey + idx : ''}_${file.name}`;
     await fbStorage.ref(path).put(file);
     target.docs[key] = file.name;
     target.docPaths[key] = path;
@@ -1141,7 +1447,9 @@ async function uploadDraftFile(file, key, emitenteIdx) {
     toast('Falha no upload: ' + e.message);
   } finally {
     target.uploading[key] = false;
-    draft.anyUploading = Object.values(draft.uploading).some(Boolean) || draft.emitentes.some(em => Object.values(em.uploading || {}).some(Boolean));
+    draft.anyUploading = Object.values(draft.uploading).some(Boolean)
+      || draft.emitentes.some(em => Object.values(em.uploading || {}).some(Boolean))
+      || draft.socios.some(s => Object.values(s.uploading || {}).some(Boolean));
     renderModal();
   }
 }
@@ -1410,6 +1718,11 @@ document.addEventListener('DOMContentLoaded', () => {
       ui.modal.draft.emitentes[idx][el.dataset.field] = el.value;
       focusPreservingRender(renderModal);
     }
+    if (el.dataset.action === 'draft-socio-field') {
+      const idx = parseInt(el.dataset.idx, 10);
+      ui.modal.draft.socios[idx][el.dataset.field] = el.value;
+      focusPreservingRender(renderModal);
+    }
   });
 
   document.body.addEventListener('change', async (e) => {
@@ -1426,6 +1739,12 @@ document.addEventListener('DOMContentLoaded', () => {
         while (arr.length < n) arr.push(emptyEmitente());
         while (arr.length > n) arr.pop();
       }
+      if (el.dataset.field === 'numeroSocios' && COVERED_OPERATIONS.includes(ui.modal.draft.operation)) {
+        const n = Math.max(0, parseInt(el.value || '0', 10) || 0);
+        const arr = ui.modal.draft.socios;
+        while (arr.length < n) arr.push(emptySocio());
+        while (arr.length > n) arr.pop();
+      }
       renderModal();
     }
     if (el.dataset.action === 'draft-emitente-field') {
@@ -1433,11 +1752,17 @@ document.addEventListener('DOMContentLoaded', () => {
       ui.modal.draft.emitentes[idx][el.dataset.field] = el.value;
       renderModal();
     }
+    if (el.dataset.action === 'draft-socio-field') {
+      const idx = parseInt(el.dataset.idx, 10);
+      ui.modal.draft.socios[idx][el.dataset.field] = el.value;
+      renderModal();
+    }
     if (el.dataset.action === 'draft-file') {
       const file = el.files[0];
       if (!file) return;
-      const emitenteIdx = el.dataset.emitente !== undefined ? parseInt(el.dataset.emitente, 10) : undefined;
-      await uploadDraftFile(file, el.dataset.key, emitenteIdx);
+      const groupKey = el.dataset.group;
+      const idx = el.dataset.idx !== undefined ? parseInt(el.dataset.idx, 10) : undefined;
+      await uploadDraftFile(file, el.dataset.key, groupKey, idx);
     }
     if (el.dataset.action === 'draft-extra-file') {
       const draft = ui.modal.draft;
