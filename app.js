@@ -182,12 +182,12 @@ const CHECKLISTS = {
     hasSocios: false, hasProcurador: false, hasImovel: false,
   },
   CONFINA_PJ: {
-    fields: ['enderecoInstitucional'], docs: ck('carta_bacen', 'relatorio_visita', 'contrato_social', 'certidao_simplificada_jc', 'cartao_cnpj', 'inscricao_estadual', 'inscricao_municipal', 'df_2022', 'df_2023', 'df_2024', 'df_2025', 'endividamento_empresa', 'organograma', 'planilha_confina'),
-    hasSocios: true, hasProcurador: false, hasImovel: true,
+    fields: ['enderecoInstitucional'], docs: ck('carta_bacen', 'contrato_social', 'certidao_simplificada_jc', 'cartao_cnpj', 'inscricao_estadual', 'inscricao_municipal', 'df_2022', 'df_2023', 'df_2024', 'df_2025', 'endividamento_empresa', 'organograma'),
+    hasSocios: true, hasProcurador: false, hasImovel: true, hasConfinaPlanilha: true, hasRelatorioVisita: true,
   },
   CONFINA_PF: {
-    fields: ['icp'], docs: ck('carta_bacen', 'relatorio_visita', 'doc_pessoal', 'comp_residencia', 'irpf', 'endividamento_pf', 'certidao_casamento_nasc', 'planilha_confina'),
-    hasSocios: false, hasProcurador: false, hasImovel: true,
+    fields: ['icp'], docs: ck('carta_bacen', 'doc_pessoal', 'comp_residencia', 'irpf', 'endividamento_pf', 'certidao_casamento_nasc'),
+    hasSocios: false, hasProcurador: false, hasImovel: true, hasConfinaPlanilha: true, hasRelatorioVisita: true,
   },
   TRADING_PJ: {
     fields: ['enderecoInstitucional'], docs: ck('carta_bacen', 'relatorio_visita', 'contrato_social', 'certidao_simplificada_jc', 'cartao_cnpj', 'inscricao_estadual', 'inscricao_municipal', 'df_2022', 'df_2023', 'df_2024', 'df_2025', 'endividamento_empresa', 'planilha_confina', 'organograma'),
@@ -243,6 +243,14 @@ function isChecklistComplete(draft, profile) {
   if (profile.hasProcurador && draft.possuiProcurador === 'Sim' && !CK_PROCURADOR_DOCS.every(d => draft.docs[d.key])) return false;
   if (!draft.temConjugeAvalista) return false;
   if (draft.temConjugeAvalista === 'Sim' && (!draft.conjugeProfissao || !draft.conjugeContato || !draft.docs.conjuge_doc_pessoal)) return false;
+  if (profile.hasConfinaPlanilha) {
+    const hasCompleteYear = CONFINA_ANOS.some(a => CONFINA_METRICAS.every(m => draft.confinaPlanilha[m.key][a.key] !== ''));
+    if (!hasCompleteYear) return false;
+  }
+  if (profile.hasRelatorioVisita) {
+    const v = draft.visitaRelatorio;
+    if (!v.razaoSocial || !v.motivoVisita || !v.produtoVisita || !v.resumoParecer) return false;
+  }
   return true;
 }
 function buildChecklistDocuments(draft, profile) {
@@ -268,6 +276,79 @@ function buildChecklistDocuments(draft, profile) {
   if (draft.temConjugeAvalista === 'Sim') push(CK_DOCS.conjuge_doc_pessoal);
   (draft.extraDocs || []).forEach((f, i) => out.push({ key: 'extra_' + i, label: `Documento adicional: ${f.name}`, status: 'enviado', fileName: f.name, storagePath: f.path }));
   return out;
+}
+
+/* ============================================================
+   PLANILHA PRODUTOR AGRÍCOLA/CONFINA (modelo Ceres) — replicates
+   "PLANILHA ABA CONFINA - Modelo v2.xlsx" (aba "Confina"): 15 input
+   metrics per year (2022-2025 Realizado, 2026-2028 Projetado) plus
+   the same derived totals as the original spreadsheet's formulas.
+   Ceres Confinamento only, per the partner's request.
+   ============================================================ */
+const CONFINA_ANOS = [
+  { key: '2022', tipo: 'Realizado' }, { key: '2023', tipo: 'Realizado' },
+  { key: '2024', tipo: 'Realizado' }, { key: '2025', tipo: 'Realizado' },
+  { key: '2026', tipo: 'Projetado' }, { key: '2027', tipo: 'Projetado' }, { key: '2028', tipo: 'Projetado' },
+];
+const CONFINA_METRICAS = [
+  { key: 'propria', label: 'Área Própria', unid: 'ha' },
+  { key: 'arrendada', label: 'Área Arrendada', unid: 'ha' },
+  { key: 'precoVendaUnit', label: 'Preço de Venda', unid: 'R$/@' },
+  { key: 'pesoMedioAbate', label: 'Peso Médio Abate Carcaça', unid: 'cbç' },
+  { key: 'machoVendidos', label: 'Macho Animais Vendidos', unid: 'cbç' },
+  { key: 'femeaVendidos', label: 'Fêmea Animais Vendidos', unid: 'cbç' },
+  { key: 'ganhoFemea', label: 'Ganho Médio Carcaça Fêmea', unid: 'gr/dia' },
+  { key: 'ganhoMacho', label: 'Ganho Médio Carcaça Macho', unid: 'gr/dia' },
+  { key: 'compraUnit', label: 'Compra', unid: 'R$/@' },
+  { key: 'entrada', label: 'Entrada', unid: '@' },
+  { key: 'custoOperacional', label: 'Custo Operacional @ Produção', unid: 'R$/@' },
+  { key: 'custeioNutricional', label: 'Custeio Nutricional', unid: 'R$/@' },
+  { key: 'periodoAlojamento', label: 'Período Alojamento', unid: 'dias' },
+  { key: 'diariaTotal', label: 'Diária Total', unid: 'cbç/dia' },
+  { key: 'producaoGanho', label: 'Produção (ganho)', unid: '@/cab' },
+];
+function emptyConfinaPlanilha() {
+  const out = {};
+  CONFINA_METRICAS.forEach(m => { out[m.key] = {}; CONFINA_ANOS.forEach(a => { out[m.key][a.key] = ''; }); });
+  return out;
+}
+// mirrors the exact cell formulas from the original spreadsheet's "Confina" tab
+function calcConfinaAno(p, anoKey) {
+  const n = (m) => Number(p?.[m]?.[anoKey]) || 0;
+  const areaTotal = n('propria') + n('arrendada');
+  const totalAnimais = n('machoVendidos') + n('femeaVendidos');
+  const ganhoConsolidado = (n('ganhoFemea') * n('ganhoMacho') > 0) ? (n('ganhoFemea') + n('ganhoMacho')) / 2 : (n('ganhoFemea') + n('ganhoMacho'));
+  const precoVendaTotal = n('precoVendaUnit') * n('pesoMedioAbate') * totalAnimais;
+  const precoCompraTotal = n('compraUnit') * n('entrada') * totalAnimais;
+  const custoTotalArroba = n('custeioNutricional') + n('custoOperacional');
+  const custoTotalCabeca = custoTotalArroba * n('producaoGanho');
+  const custoTotalReais = custoTotalArroba * totalAnimais * n('producaoGanho');
+  const receita = precoVendaTotal;
+  const custoCompraBoi = precoCompraTotal;
+  const resultadoBruto = receita - custoCompraBoi;
+  const custoProducao = custoTotalReais;
+  const resultadoOperacional = resultadoBruto - custoProducao;
+  const margemLiquida = receita !== 0 ? resultadoOperacional / receita : null;
+  return { areaTotal, totalAnimais, ganhoConsolidado, custoTotalArroba, custoTotalCabeca, receita, custoCompraBoi, resultadoBruto, custoProducao, resultadoOperacional, margemLiquida };
+}
+
+/* ============================================================
+   RELATÓRIO DE VISITA — replicates "RELATÓRIO DE VISITA -.xlsx".
+   Ceres Confinamento only, per the partner's request.
+   ============================================================ */
+const VISITA_MOTIVOS = ['PROSPECÇÃO', 'MAJORAÇÃO DE LIMITE', 'ATUALIZAÇÃO'];
+const VISITA_PRODUTOS = ['ANTECIPAÇÃO DE RECEBÍVEIS', 'CPR', 'CRA', 'CDCA', 'OUTRO'];
+const VISITA_ROW_COUNT = 5;
+function emptyVisitaRows(fields) { return Array.from({ length: VISITA_ROW_COUNT }, () => { const o = {}; fields.forEach(f => o[f] = ''); return o; }); }
+function emptyVisitaRelatorio() {
+  return {
+    razaoSocial: '', cnpj: '', responsavel: '', motivoVisita: '', produtoVisita: '',
+    limiteSugerido: '', devedoresSolidarios: '', garantia: '', desenhoOperacao: '',
+    segmentos: emptyVisitaRows(['segmento', 'percentual', 'fornecedores']),
+    culturas: emptyVisitaRows(['cultura', 'percentual', 'comentarios']),
+    produtoresRurais: emptyVisitaRows(['culturas', 'totalHa', 'cidade']),
+    resumoParecer: '',
+  };
 }
 
 /* ============================================================
@@ -920,6 +1001,8 @@ function RequestDetail(requestId, mode, returnTo) {
         </div>
       ` : ''}
     </div>
+    ${f.confinaPlanilha ? ConfinaPlanilhaSection(f.confinaPlanilha, true) : ''}
+    ${f.visitaRelatorio ? VisitaRelatorioSection(f.visitaRelatorio, true) : ''}
 
     <div class="section-label">Documentos anexados</div>
     ${(r.documents || []).map(d => `
@@ -1179,6 +1262,106 @@ function renderModal() {
   else if (ui.modal.type === 'error-detail') root.innerHTML = ErrorDetailModal(ui.modal.id);
 }
 
+function ConfinaPlanilhaSection(p, readonly) {
+  const cell = (metricKey, anoKey) => readonly
+    ? esc(p[metricKey]?.[anoKey] || '—')
+    : `<input type="number" step="0.01" value="${esc(p[metricKey][anoKey])}" data-action="confina-planilha-field" data-metric="${metricKey}" data-ano="${anoKey}" style="width:88px;padding:6px;font-size:12px;">`;
+  const computedRow = (label, unid, getVal, fmt) => `
+    <tr>
+      <td style="padding:6px;font-weight:700;">${esc(label)}</td>
+      <td style="padding:6px;color:var(--muted);font-size:11px;">${unid}</td>
+      ${CONFINA_ANOS.map(a => `<td style="padding:6px;text-align:right;font-weight:700;white-space:nowrap;">${fmt(getVal(a.key))}</td>`).join('')}
+    </tr>
+  `;
+  const n0 = (v) => (v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+  const pct = (v) => v === null ? '—' : (v * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '%';
+  return `
+    <div class="section-divider"></div>
+    <div class="section-label">Planilha Produtor Agrícola/Confina (modelo Ceres)</div>
+    ${readonly ? '' : '<div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Preencha ao menos um ano completo (histórico ou projetado). Os totais são calculados automaticamente.</div>'}
+    <div style="overflow-x:auto;">
+      <table style="border-collapse:collapse;width:100%;font-size:12.5px;min-width:760px;">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding:6px;">Métrica</th>
+            <th style="padding:6px;">Unid.</th>
+            ${CONFINA_ANOS.map(a => `<th style="padding:6px;white-space:nowrap;">${a.key}<br><span style="font-weight:500;color:var(--muted);font-size:10px;">${a.tipo}</span></th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${CONFINA_METRICAS.map(m => `
+            <tr>
+              <td style="padding:6px;">${esc(m.label)}</td>
+              <td style="padding:6px;color:var(--muted);font-size:11px;">${m.unid}</td>
+              ${CONFINA_ANOS.map(a => `<td style="padding:4px;">${cell(m.key, a.key)}</td>`).join('')}
+            </tr>
+          `).join('')}
+          ${computedRow('Área Total', 'ha', k => calcConfinaAno(p, k).areaTotal, n0)}
+          ${computedRow('Total Animais Vendidos', 'cbç', k => calcConfinaAno(p, k).totalAnimais, n0)}
+          ${computedRow('Ganho Médio Consolidado', 'gr/dia', k => calcConfinaAno(p, k).ganhoConsolidado, n0)}
+          ${computedRow('Receita (Venda)', 'R$', k => calcConfinaAno(p, k).receita, fmtBRL)}
+          ${computedRow('Custo (Compra Boi)', 'R$', k => calcConfinaAno(p, k).custoCompraBoi, fmtBRL)}
+          ${computedRow('Resultado Bruto', 'R$', k => calcConfinaAno(p, k).resultadoBruto, fmtBRL)}
+          ${computedRow('Custo de Produção', 'R$', k => calcConfinaAno(p, k).custoProducao, fmtBRL)}
+          ${computedRow('Resultado Operacional', 'R$', k => calcConfinaAno(p, k).resultadoOperacional, fmtBRL)}
+          ${computedRow('Margem Líquida', '%', k => calcConfinaAno(p, k).margemLiquida, pct)}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function VisitaRelatorioSection(v, readonly) {
+  const inp = (field, type = 'text') => readonly
+    ? esc(v[field] || '—')
+    : `<input type="${type}" ${type === 'number' ? 'step="0.01"' : ''} value="${esc(v[field])}" data-action="visita-field" data-field="${field}">`;
+  const sel = (field, options) => readonly
+    ? esc(v[field] || '—')
+    : `<select data-action="visita-field" data-field="${field}"><option value="">Selecione...</option>${options.map(o => `<option ${v[field] === o ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
+  const rowTable = (title, cols, tableKey, rows) => `
+    <div class="section-label" style="margin-top:16px;">${title}</div>
+    <div style="overflow-x:auto;">
+      <table style="border-collapse:collapse;width:100%;font-size:12.5px;margin-bottom:10px;">
+        <thead><tr>${cols.map(c => `<th style="text-align:left;padding:6px;">${esc(c.label)}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${rows.map((row, i) => `
+            <tr>
+              ${cols.map(c => `<td style="padding:4px;">${readonly ? esc(row[c.key] || '—') : `<input type="${c.type || 'text'}" value="${esc(row[c.key])}" data-action="visita-row-field" data-table="${tableKey}" data-idx="${i}" data-field="${c.key}" style="width:100%;padding:6px;font-size:12px;">`}</td>`).join('')}
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+  return `
+    <div class="section-divider"></div>
+    <div class="section-label">Relatório de Visita</div>
+    <div class="form-grid-2">
+      <div class="field"><label>Razão Social</label>${readonly ? `<input type="text" value="${esc(v.razaoSocial)}" disabled>` : inp('razaoSocial')}</div>
+      <div class="field"><label>CNPJ</label>${readonly ? `<input type="text" value="${esc(v.cnpj)}" disabled>` : inp('cnpj')}</div>
+    </div>
+    <div class="form-grid-2">
+      <div class="field"><label>Responsável pela Empresa</label>${readonly ? `<input type="text" value="${esc(v.responsavel)}" disabled>` : inp('responsavel')}</div>
+      <div class="field"><label>Motivo da Visita</label>${readonly ? `<input type="text" value="${esc(v.motivoVisita)}" disabled>` : sel('motivoVisita', VISITA_MOTIVOS)}</div>
+    </div>
+    <div class="form-grid-2">
+      <div class="field"><label>Limite Sugerido (R$)</label>${readonly ? `<input type="text" value="${esc(v.limiteSugerido)}" disabled>` : inp('limiteSugerido', 'number')}</div>
+      <div class="field"><label>Produto</label>${readonly ? `<input type="text" value="${esc(v.produtoVisita)}" disabled>` : sel('produtoVisita', VISITA_PRODUTOS)}</div>
+    </div>
+    <div class="form-grid-2">
+      <div class="field"><label>Devedores Solidários (aval)</label>${readonly ? `<input type="text" value="${esc(v.devedoresSolidarios)}" disabled>` : inp('devedoresSolidarios')}</div>
+      <div class="field"><label>Garantia</label>${readonly ? `<input type="text" value="${esc(v.garantia)}" disabled>` : inp('garantia')}</div>
+    </div>
+    <div class="field"><label>Desenho da Operação</label>${readonly ? `<textarea disabled>${esc(v.desenhoOperacao)}</textarea>` : `<textarea data-action="visita-field" data-field="desenhoOperacao">${esc(v.desenhoOperacao)}</textarea>`}</div>
+
+    ${rowTable('1. Segmentação de Negócios', [{ key: 'segmento', label: 'Segmento' }, { key: 'percentual', label: '%', type: 'number' }, { key: 'fornecedores', label: 'Fornecedores' }], 'segmentos', v.segmentos)}
+    ${rowTable('2. Culturas Atendidas', [{ key: 'cultura', label: 'Cultura' }, { key: 'percentual', label: '%', type: 'number' }, { key: 'comentarios', label: 'Comentários' }], 'culturas', v.culturas)}
+    ${rowTable('3. Sócios Produtores Rurais (culturas, hectares e local)', [{ key: 'culturas', label: 'Principais Culturas' }, { key: 'totalHa', label: 'Total (ha)', type: 'number' }, { key: 'cidade', label: 'Cidade' }], 'produtoresRurais', v.produtoresRurais)}
+
+    <div class="field"><label>5. Resumo sobre a Empresa/Sócios e Parecer</label>${readonly ? `<textarea disabled>${esc(v.resumoParecer)}</textarea>` : `<textarea data-action="visita-field" data-field="resumoParecer">${esc(v.resumoParecer)}</textarea>`}</div>
+  `;
+}
+
 function ChecklistFormFields(draft, profile, uploadSlot) {
   let html = '<div class="section-divider"></div><div class="section-label">Dados Adicionais</div>';
 
@@ -1200,6 +1383,9 @@ function ChecklistFormFields(draft, profile, uploadSlot) {
 
   html += '<div class="section-divider"></div><div class="section-label">Anexar Documentos Obrigatórios</div>';
   html += profile.docs.map(d => uploadSlot(d.key, d.label + (d.optional ? ' (opcional)' : ''), draft.docs, '', draft.uploading[d.key])).join('');
+
+  if (profile.hasConfinaPlanilha) html += ConfinaPlanilhaSection(draft.confinaPlanilha, false);
+  if (profile.hasRelatorioVisita) html += VisitaRelatorioSection(draft.visitaRelatorio, false);
 
   if (profile.hasSocios) {
     html += `
@@ -1559,6 +1745,7 @@ function emptyDraft() {
     subtipoOperacao: '', numeroSocios: '', infoSocios: '', possuiProcurador: '', infoProcurador: '', tipoPessoaMatricula: '',
     possuiAvalista: '', certidaoPFPJ: '', numeroEmitentes: '',
     temConjugeAvalista: '', conjugeProfissao: '', conjugeContato: '',
+    confinaPlanilha: emptyConfinaPlanilha(), visitaRelatorio: emptyVisitaRelatorio(),
     emitentes: [], socios: [], obs: '', docs: {}, docPaths: {}, uploading: {}, extraDocs: [], anyUploading: false,
   };
 }
@@ -1884,6 +2071,19 @@ document.addEventListener('DOMContentLoaded', () => {
       ui.admin.commissionDraft[el.dataset.field] = el.value;
       focusPreservingRender(renderPartial);
     }
+    if (el.dataset.action === 'confina-planilha-field') {
+      ui.modal.draft.confinaPlanilha[el.dataset.metric][el.dataset.ano] = el.value;
+      focusPreservingRender(renderModal);
+    }
+    if (el.dataset.action === 'visita-field') {
+      ui.modal.draft.visitaRelatorio[el.dataset.field] = el.value;
+      focusPreservingRender(renderModal);
+    }
+    if (el.dataset.action === 'visita-row-field') {
+      const idx = parseInt(el.dataset.idx, 10);
+      ui.modal.draft.visitaRelatorio[el.dataset.table][idx][el.dataset.field] = el.value;
+      focusPreservingRender(renderModal);
+    }
   });
 
   document.body.addEventListener('change', async (e) => {
@@ -1893,6 +2093,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (el.dataset.action === 'partner-filter-operation') { ui.partner.operationFilter = el.value; renderPartial(); }
     if (el.dataset.action === 'commission-field') { ui.admin.commissionDraft[el.dataset.field] = el.value; renderPartial(); }
     if (el.dataset.action === 'commission-checkbox') { ui.admin.commissionDraft[el.dataset.field] = el.checked; renderPartial(); }
+    if (el.dataset.action === 'visita-field') { ui.modal.draft.visitaRelatorio[el.dataset.field] = el.value; renderModal(); }
 
     if (el.dataset.action === 'draft-field') {
       ui.modal.draft[el.dataset.field] = el.value;
@@ -1979,6 +2180,9 @@ function focusPreservingRender(renderFn) {
       action: active.dataset.action || null,
       field: active.dataset.field || null,
       idx: active.dataset.idx !== undefined ? active.dataset.idx : null,
+      metric: active.dataset.metric || null,
+      ano: active.dataset.ano || null,
+      table: active.dataset.table || null,
       id: active.id || null,
       start: active.selectionStart,
       end: active.selectionEnd,
@@ -1990,6 +2194,9 @@ function focusPreservingRender(renderFn) {
   if (!sel.id) {
     if (sel.field) selector += `[data-field="${sel.field}"]`;
     if (sel.idx !== null) selector += `[data-idx="${sel.idx}"]`;
+    if (sel.metric) selector += `[data-metric="${sel.metric}"]`;
+    if (sel.ano) selector += `[data-ano="${sel.ano}"]`;
+    if (sel.table) selector += `[data-table="${sel.table}"]`;
   }
   const found = document.querySelector(selector);
   if (found) {
