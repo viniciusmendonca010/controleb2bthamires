@@ -190,12 +190,16 @@ const CHECKLISTS = {
     hasSocios: false, hasProcurador: false, hasImovel: true, hasConfinaPlanilha: true, hasRelatorioVisita: true,
   },
   TRADING_PJ: {
-    fields: ['enderecoInstitucional'], docs: ck('carta_bacen', 'relatorio_visita', 'contrato_social', 'certidao_simplificada_jc', 'cartao_cnpj', 'inscricao_estadual', 'inscricao_municipal', 'df_2022', 'df_2023', 'df_2024', 'df_2025', 'endividamento_empresa', 'planilha_confina', 'organograma'),
-    hasSocios: true, hasProcurador: true, hasImovel: true,
+    fields: ['enderecoInstitucional', 'dadosBancarios', 'enderecoFazenda'],
+    docs: ck('carta_bacen', 'contrato_social', 'certidao_simplificada_jc', 'cartao_cnpj', 'inscricao_estadual', 'inscricao_municipal', 'df_2022', 'df_2023', 'df_2024', 'df_2025', 'planilha_confina', 'organograma'),
+    hasSocios: true, hasSocioExtra: true, hasSocioPatrimonio: true, hasProcurador: true, hasImovel: true,
+    hasRelatorioVisita: true, hasEndividamentoPatrimonio: true, hasFaturamento: true,
   },
   TRADING_PF: {
-    fields: ['icp'], docs: ck('carta_bacen', 'relatorio_visita', 'doc_pessoal', 'comp_residencia', 'irpf', 'endividamento_pf', 'certidao_casamento_nasc', 'planilha_confina'),
+    fields: ['icp', 'dadosBancarios', 'enderecoFazenda', 'nacionalidade'],
+    docs: ck('carta_bacen', 'doc_pessoal', 'comp_residencia', 'irpf', 'certidao_casamento_nasc', 'planilha_confina'),
     hasSocios: false, hasProcurador: false, hasImovel: true,
+    hasRelatorioVisita: true, hasEndividamentoPatrimonio: true, hasFaturamento: true, hasPatrimonioPessoal: true,
   },
 };
 function resolveProfile(draft) {
@@ -219,6 +223,9 @@ function isValidDocumentoForTipo(documento, tipoPessoa) {
 function isChecklistComplete(draft, profile) {
   if (profile.fields.includes('enderecoInstitucional') && !draft.enderecoInstitucional) return false;
   if (profile.fields.includes('icp') && (!draft.profissao || !draft.icp)) return false;
+  if (profile.fields.includes('nacionalidade') && (!draft.nacionalidade || !draft.estadoCivil)) return false;
+  if (profile.fields.includes('dadosBancarios') && !draft.dadosBancarios) return false;
+  if (profile.fields.includes('enderecoFazenda') && !draft.enderecoFazenda) return false;
   if (!profile.docs.filter(d => !d.optional).every(d => draft.docs[d.key])) return false;
 
   if (profile.hasImovel) {
@@ -238,6 +245,7 @@ function isChecklistComplete(draft, profile) {
       const s = draft.socios[i];
       if (!s || !s.nome || !s.cpf || !isValidCPF(s.cpf) || !s.profissao) return false;
       if (!CK_SOCIO_DOCS.every(d => s.docs[d.key])) return false;
+      if (profile.hasSocioExtra && (!s.nacionalidade || !s.estadoCivil)) return false;
     }
   }
   if (profile.hasProcurador && draft.possuiProcurador === 'Sim' && !CK_PROCURADOR_DOCS.every(d => draft.docs[d.key])) return false;
@@ -250,6 +258,14 @@ function isChecklistComplete(draft, profile) {
   if (profile.hasRelatorioVisita) {
     const v = draft.visitaRelatorio;
     if (!v.razaoSocial || !v.motivoVisita || !v.produtoVisita || !v.resumoParecer) return false;
+  }
+  if (profile.hasFaturamento) {
+    const hasCompleteYear = FATURAMENTO_ANOS.some(a => FATURAMENTO_MESES.every(m => draft.faturamento[m][a] !== ''));
+    if (!hasCompleteYear) return false;
+  }
+  if (profile.hasEndividamentoPatrimonio) {
+    const hasFazenda = draft.endividamentoPatrimonio.fazendas.some(f => f.nome !== '');
+    if (!hasFazenda) return false;
   }
   return true;
 }
@@ -349,6 +365,59 @@ function emptyVisitaRelatorio() {
     produtoresRurais: emptyVisitaRows(['culturas', 'totalHa', 'cidade']),
     resumoParecer: '',
   };
+}
+
+/* ============================================================
+   FATURAMENTO MENSAL — replicates "Modelo de Faturamento.xlsx".
+   Ceres Trading only, per the partner's request.
+   ============================================================ */
+const FATURAMENTO_MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+const FATURAMENTO_MES_LABELS = { jan: 'JAN', fev: 'FEV', mar: 'MAR', abr: 'ABR', mai: 'MAI', jun: 'JUN', jul: 'JUL', ago: 'AGO', set: 'SET', out: 'OUT', nov: 'NOV', dez: 'DEZ' };
+const FATURAMENTO_ANOS = ['2021', '2022', '2023', '2024', '2025'];
+function emptyFaturamento() {
+  const out = {};
+  FATURAMENTO_MESES.forEach(m => { out[m] = {}; FATURAMENTO_ANOS.forEach(a => { out[m][a] = ''; }); });
+  return out;
+}
+function calcFaturamentoAno(f, ano) {
+  const total = FATURAMENTO_MESES.reduce((s, m) => s + (Number(f?.[m]?.[ano]) || 0), 0);
+  return { total, media: total / 12 };
+}
+function calcFaturamentoVar(f, ano, anoAnterior) {
+  const atual = calcFaturamentoAno(f, ano).total;
+  const anterior = calcFaturamentoAno(f, anoAnterior).total;
+  return anterior ? (atual - anterior) / anterior : null;
+}
+
+/* ============================================================
+   ENDIVIDAMENTO E PATRIMÔNIO — replicates "Modelo endividamento e
+   Patrimonio.xlsx" (abas Endiv. e Patrimônio: a debt schedule and a
+   farm/property list; personal net worth per sócio/titular lives on
+   the sócio object itself, see emptySocio/PatrimonioPessoalFields).
+   Ceres Trading only, per the partner's request.
+   ============================================================ */
+const ENDIV_ANOS = ['2026', '2027', '2028', '2029', '2030', '2031', '2032', '2033', '2034', '2035'];
+const ENDIV_ROW_COUNT = 5;
+function emptyEndividamentoPatrimonio() {
+  const dividaFields = ['tomador', 'banco', 'saldoDevedor', 'tipo', 'garantias', 'taxa', ...ENDIV_ANOS.map(a => 'y' + a)];
+  const fazendaFields = ['nome', 'proprietario', 'cidadeUf', 'matricula', 'tipoPosse', 'areaTotal', 'areaPlantio', 'custoArrendamento'];
+  const rows = (fields) => Array.from({ length: ENDIV_ROW_COUNT }, () => { const o = {}; fields.forEach(f => o[f] = ''); return o; });
+  return { dividas: rows(dividaFields), fazendas: rows(fazendaFields) };
+}
+function calcPatrimonioTotais(ep) {
+  const num = (v) => Number(v) || 0;
+  return {
+    areaTotal: ep.fazendas.reduce((s, f) => s + num(f.areaTotal), 0),
+    areaPlantio: ep.fazendas.reduce((s, f) => s + num(f.areaPlantio), 0),
+    saldoDevedorTotal: ep.dividas.reduce((s, d) => s + num(d.saldoDevedor), 0),
+  };
+}
+// personal wealth fields (Bens e direitos PF, Dívida PF, atividade rural) live directly
+// on a sócio (per sócio) or on the top-level draft (single PF titular)
+const PATRIMONIO_PESSOAL_FIELDS = ['bensImoveis', 'bensAplicacoes', 'bensParticipacoes', 'bensOutros', 'dividaPF', 'areaExploracao', 'receitaRural', 'despesaRural', 'estoqueRebanho', 'dividaRural'];
+function calcTotalBens(obj) {
+  const num = (v) => Number(v) || 0;
+  return num(obj.bensImoveis) + num(obj.bensAplicacoes) + num(obj.bensParticipacoes) + num(obj.bensOutros);
 }
 
 /* ============================================================
@@ -994,6 +1063,17 @@ function RequestDetail(requestId, mode, returnTo) {
           <div class="field"><label>Endereço Institucional</label><input type="text" value="${esc(f.enderecoInstitucional)}" disabled></div>
         </div>
       ` : ''}
+      ${f.enderecoFazenda || f.dadosBancarios ? `
+        <div class="form-grid-2">
+          <div class="field"><label>Endereço da Fazenda</label><input type="text" value="${esc(f.enderecoFazenda || 'N/A')}" disabled></div>
+          <div class="field"><label>Dados Bancários</label><input type="text" value="${esc(f.dadosBancarios || 'N/A')}" disabled></div>
+        </div>
+      ` : ''}
+      ${f.nacionalidade ? `
+        <div class="form-grid-2">
+          <div class="field"><label>Nacionalidade</label><input type="text" value="${esc(f.nacionalidade)}" disabled></div>
+        </div>
+      ` : ''}
       ${f.temConjugeAvalista ? `
         <div class="form-grid-2">
           <div class="field"><label>Possui Cônjuge/Avalista?</label><input type="text" value="${esc(f.temConjugeAvalista)}" disabled></div>
@@ -1003,6 +1083,8 @@ function RequestDetail(requestId, mode, returnTo) {
     </div>
     ${f.confinaPlanilha ? ConfinaPlanilhaSection(f.confinaPlanilha, true) : ''}
     ${f.visitaRelatorio ? VisitaRelatorioSection(f.visitaRelatorio, true) : ''}
+    ${f.faturamento ? FaturamentoSection(f.faturamento, true) : ''}
+    ${f.endividamentoPatrimonio ? EndividamentoPatrimonioSection(f.endividamentoPatrimonio, true) : ''}
 
     <div class="section-label">Documentos anexados</div>
     ${(r.documents || []).map(d => `
@@ -1362,6 +1444,109 @@ function VisitaRelatorioSection(v, readonly) {
   `;
 }
 
+function FaturamentoSection(f, readonly) {
+  const cell = (mes, ano) => readonly
+    ? esc(f[mes]?.[ano] || '—')
+    : `<input type="number" step="0.01" value="${esc(f[mes][ano])}" data-action="faturamento-field" data-metric="${mes}" data-ano="${ano}" style="width:88px;padding:6px;font-size:12px;">`;
+  const pct = (v) => v === null ? '—' : (v * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '%';
+  return `
+    <div class="section-divider"></div>
+    <div class="section-label">Faturamento Mensal</div>
+    ${readonly ? '' : '<div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Preencha ao menos um ano completo. Total, média e variação são calculados automaticamente.</div>'}
+    <div style="overflow-x:auto;">
+      <table style="border-collapse:collapse;width:100%;font-size:12.5px;min-width:560px;">
+        <thead><tr><th style="text-align:left;padding:6px;">Mês</th>${FATURAMENTO_ANOS.map(a => `<th style="padding:6px;">${a}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${FATURAMENTO_MESES.map(m => `<tr><td style="padding:6px;">${FATURAMENTO_MES_LABELS[m]}</td>${FATURAMENTO_ANOS.map(a => `<td style="padding:4px;">${cell(m, a)}</td>`).join('')}</tr>`).join('')}
+          <tr><td style="padding:6px;font-weight:700;">TOTAL</td>${FATURAMENTO_ANOS.map(a => `<td style="padding:6px;text-align:right;font-weight:700;">${fmtBRL(calcFaturamentoAno(f, a).total)}</td>`).join('')}</tr>
+          <tr><td style="padding:6px;font-weight:700;">MÉDIA</td>${FATURAMENTO_ANOS.map(a => `<td style="padding:6px;text-align:right;font-weight:700;">${fmtBRL(calcFaturamentoAno(f, a).media)}</td>`).join('')}</tr>
+          <tr><td style="padding:6px;font-weight:700;">VAR. % vs ano anterior</td>${FATURAMENTO_ANOS.map((a, i) => `<td style="padding:6px;text-align:right;font-weight:700;">${i === 0 ? '—' : pct(calcFaturamentoVar(f, a, FATURAMENTO_ANOS[i - 1]))}</td>`).join('')}</tr>
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function EndividamentoPatrimonioSection(ep, readonly) {
+  const rowInput = (table, i, field, type = 'text') => readonly
+    ? esc(ep[table][i][field] || '—')
+    : `<input type="${type}" ${type === 'number' ? 'step="0.01"' : ''} value="${esc(ep[table][i][field])}" data-action="endiv-row-field" data-table="${table}" data-idx="${i}" data-field="${field}" style="width:100%;padding:6px;font-size:12px;">`;
+  const totals = calcPatrimonioTotais(ep);
+  const n2 = (v) => (v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+  return `
+    <div class="section-divider"></div>
+    <div class="section-label">Endividamento</div>
+    ${readonly ? '' : '<div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Uma linha por dívida/financiamento em aberto (deixe em branco se não houver).</div>'}
+    <div style="overflow-x:auto;">
+      <table style="border-collapse:collapse;width:100%;font-size:12px;min-width:1100px;">
+        <thead><tr>
+          <th style="padding:6px;text-align:left;">Tomador</th><th style="padding:6px;text-align:left;">Banco</th>
+          <th style="padding:6px;">Saldo Devedor</th><th style="padding:6px;">Tipo</th><th style="padding:6px;">Garantias</th><th style="padding:6px;">Taxa</th>
+          ${ENDIV_ANOS.map(a => `<th style="padding:6px;">${a}</th>`).join('')}
+        </tr></thead>
+        <tbody>
+          ${ep.dividas.map((d, i) => `
+            <tr>
+              <td style="padding:4px;">${rowInput('dividas', i, 'tomador')}</td>
+              <td style="padding:4px;">${rowInput('dividas', i, 'banco')}</td>
+              <td style="padding:4px;">${rowInput('dividas', i, 'saldoDevedor', 'number')}</td>
+              <td style="padding:4px;">${rowInput('dividas', i, 'tipo')}</td>
+              <td style="padding:4px;">${rowInput('dividas', i, 'garantias')}</td>
+              <td style="padding:4px;">${rowInput('dividas', i, 'taxa')}</td>
+              ${ENDIV_ANOS.map(a => `<td style="padding:4px;">${rowInput('dividas', i, 'y' + a, 'number')}</td>`).join('')}
+            </tr>
+          `).join('')}
+          <tr><td colspan="2" style="padding:6px;font-weight:700;">Total Saldo Devedor</td><td style="padding:6px;font-weight:700;">${fmtBRL(totals.saldoDevedorTotal)}</td><td colspan="${4 + ENDIV_ANOS.length}"></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section-label" style="margin-top:18px;">Patrimônio — Fazendas/Imóveis</div>
+    <div style="overflow-x:auto;">
+      <table style="border-collapse:collapse;width:100%;font-size:12.5px;">
+        <thead><tr>
+          <th style="padding:6px;text-align:left;">Nome da Fazenda</th><th style="padding:6px;text-align:left;">Proprietário</th>
+          <th style="padding:6px;text-align:left;">Cidade/UF</th><th style="padding:6px;text-align:left;">Nº Matrícula</th>
+          <th style="padding:6px;">Própria/Arrendada</th><th style="padding:6px;">Área Total (ha)</th>
+          <th style="padding:6px;">Área de Plantio (ha)</th><th style="padding:6px;">Custo Arrendamento (R$)</th>
+        </tr></thead>
+        <tbody>
+          ${ep.fazendas.map((p, i) => `
+            <tr>
+              <td style="padding:4px;">${rowInput('fazendas', i, 'nome')}</td>
+              <td style="padding:4px;">${rowInput('fazendas', i, 'proprietario')}</td>
+              <td style="padding:4px;">${rowInput('fazendas', i, 'cidadeUf')}</td>
+              <td style="padding:4px;">${rowInput('fazendas', i, 'matricula')}</td>
+              <td style="padding:4px;">${rowInput('fazendas', i, 'tipoPosse')}</td>
+              <td style="padding:4px;">${rowInput('fazendas', i, 'areaTotal', 'number')}</td>
+              <td style="padding:4px;">${rowInput('fazendas', i, 'areaPlantio', 'number')}</td>
+              <td style="padding:4px;">${rowInput('fazendas', i, 'custoArrendamento', 'number')}</td>
+            </tr>
+          `).join('')}
+          <tr><td colspan="5" style="padding:6px;font-weight:700;">Total</td><td style="padding:6px;font-weight:700;">${n2(totals.areaTotal)}</td><td style="padding:6px;font-weight:700;">${n2(totals.areaPlantio)}</td><td></td></tr>
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+// shared personal-wealth block: works for a sócio (data-action="draft-socio-field" + idx)
+// or the top-level draft for a lone PF titular (data-action="draft-field")
+function PatrimonioPessoalFields(obj, actionAttrs, readonly) {
+  const f = (field, label) => readonly
+    ? `<div class="field"><label>${label}</label><input type="text" value="${esc(obj[field])}" disabled></div>`
+    : `<div class="field"><label>${label}</label><input type="number" step="0.01" value="${esc(obj[field])}" ${actionAttrs} data-field="${field}"></div>`;
+  return `
+    <div class="section-label" style="margin-top:14px;">Patrimônio Pessoal</div>
+    <div class="form-grid-2">${f('bensImoveis', 'Imóveis e Terrenos (R$)')}${f('bensAplicacoes', 'Aplicações e Disponibilidades (R$)')}</div>
+    <div class="form-grid-2">${f('bensParticipacoes', 'Participações em Empresas (R$)')}${f('bensOutros', 'Outros Bens (R$)')}</div>
+    <div style="font-size:13px;font-weight:700;margin:6px 0 10px;">Total de Bens: ${fmtBRL(calcTotalBens(obj))}</div>
+    <div class="form-grid-2">${f('dividaPF', 'Dívida Pessoa Física (R$)')}${f('areaExploracao', 'Área de Exploração (ha)')}</div>
+    <div class="form-grid-2">${f('receitaRural', 'Receita Atividade Rural (R$)')}${f('despesaRural', 'Despesa Atividade Rural (R$)')}</div>
+    <div class="form-grid-2">${f('estoqueRebanho', 'Estoque de Rebanho (R$)')}${f('dividaRural', 'Dívida Rural (R$)')}</div>
+  `;
+}
+
 function ChecklistFormFields(draft, profile, uploadSlot) {
   let html = '<div class="section-divider"></div><div class="section-label">Dados Adicionais</div>';
 
@@ -1380,12 +1565,34 @@ function ChecklistFormFields(draft, profile, uploadSlot) {
       </div>
     `;
   }
+  if (profile.fields.includes('nacionalidade')) {
+    html += `
+      <div class="form-grid-2">
+        <div class="field"><label>Nacionalidade</label><input type="text" value="${esc(draft.nacionalidade)}" data-action="draft-field" data-field="nacionalidade"></div>
+        <div class="field"><label>Estado Civil</label>
+          <select data-action="draft-field" data-field="estadoCivil">
+            <option value="">Selecione...</option>
+            ${['Solteiro(a)', 'Casado(a)', 'União Estável', 'Viúvo(a)'].map(o => `<option ${draft.estadoCivil === o ? 'selected' : ''}>${o}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+    `;
+  }
+  if (profile.fields.includes('dadosBancarios')) {
+    html += `<div class="field"><label>Dados Bancários</label><textarea placeholder="Banco, agência, conta, tipo de conta, PIX..." data-action="draft-field" data-field="dadosBancarios">${esc(draft.dadosBancarios)}</textarea></div>`;
+  }
+  if (profile.fields.includes('enderecoFazenda')) {
+    html += `<div class="field"><label>Endereço Completo da Fazenda</label><input type="text" value="${esc(draft.enderecoFazenda)}" data-action="draft-field" data-field="enderecoFazenda"></div>`;
+  }
+  if (profile.hasPatrimonioPessoal) html += PatrimonioPessoalFields(draft, 'data-action="draft-field"', false);
 
   html += '<div class="section-divider"></div><div class="section-label">Anexar Documentos Obrigatórios</div>';
   html += profile.docs.map(d => uploadSlot(d.key, d.label + (d.optional ? ' (opcional)' : ''), draft.docs, '', draft.uploading[d.key])).join('');
 
   if (profile.hasConfinaPlanilha) html += ConfinaPlanilhaSection(draft.confinaPlanilha, false);
   if (profile.hasRelatorioVisita) html += VisitaRelatorioSection(draft.visitaRelatorio, false);
+  if (profile.hasFaturamento) html += FaturamentoSection(draft.faturamento, false);
+  if (profile.hasEndividamentoPatrimonio) html += EndividamentoPatrimonioSection(draft.endividamentoPatrimonio, false);
 
   if (profile.hasSocios) {
     html += `
@@ -1404,8 +1611,20 @@ function ChecklistFormFields(draft, profile, uploadSlot) {
             <div class="field"><label>E-mail</label><input type="email" value="${esc(s.email)}" data-action="draft-socio-field" data-idx="${i}" data-field="email"></div>
             <div class="field"><label>Telefone</label><input type="text" value="${esc(s.telefone)}" data-action="draft-socio-field" data-idx="${i}" data-field="telefone"></div>
           </div>
+          ${profile.hasSocioExtra ? `
+            <div class="form-grid-2">
+              <div class="field"><label>Nacionalidade</label><input type="text" value="${esc(s.nacionalidade)}" data-action="draft-socio-field" data-idx="${i}" data-field="nacionalidade"></div>
+              <div class="field"><label>Estado Civil</label>
+                <select data-action="draft-socio-field" data-idx="${i}" data-field="estadoCivil">
+                  <option value="">Selecione...</option>
+                  ${['Solteiro(a)', 'Casado(a)', 'União Estável', 'Viúvo(a)'].map(o => `<option ${s.estadoCivil === o ? 'selected' : ''}>${o}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+          ` : ''}
           <div class="section-label">Documentos do Sócio ${i + 1}</div>
           ${CK_SOCIO_DOCS.map(d => uploadSlot(d.key, d.label, s.docs, `data-group="socios" data-idx="${i}"`, (s.uploading || {})[d.key])).join('')}
+          ${profile.hasSocioPatrimonio ? PatrimonioPessoalFields(s, `data-action="draft-socio-field" data-idx="${i}"`, false) : ''}
         </div>
       `).join('')}
     `;
@@ -1745,12 +1964,23 @@ function emptyDraft() {
     subtipoOperacao: '', numeroSocios: '', infoSocios: '', possuiProcurador: '', infoProcurador: '', tipoPessoaMatricula: '',
     possuiAvalista: '', certidaoPFPJ: '', numeroEmitentes: '',
     temConjugeAvalista: '', conjugeProfissao: '', conjugeContato: '',
+    dadosBancarios: '', enderecoFazenda: '', nacionalidade: '',
     confinaPlanilha: emptyConfinaPlanilha(), visitaRelatorio: emptyVisitaRelatorio(),
+    faturamento: emptyFaturamento(), endividamentoPatrimonio: emptyEndividamentoPatrimonio(),
+    bensImoveis: '', bensAplicacoes: '', bensParticipacoes: '', bensOutros: '', dividaPF: '',
+    areaExploracao: '', receitaRural: '', despesaRural: '', estoqueRebanho: '', dividaRural: '',
     emitentes: [], socios: [], obs: '', docs: {}, docPaths: {}, uploading: {}, extraDocs: [], anyUploading: false,
   };
 }
 function emptyEmitente() { return { nome: '', cpf: '', email: '', telefone: '', profissao: '', icp: '', estadoCivil: '', docs: {}, docPaths: {}, uploading: {} }; }
-function emptySocio() { return { nome: '', cpf: '', profissao: '', email: '', telefone: '', docs: {}, docPaths: {}, uploading: {} }; }
+function emptySocio() {
+  return {
+    nome: '', cpf: '', profissao: '', email: '', telefone: '', nacionalidade: '', estadoCivil: '',
+    bensImoveis: '', bensAplicacoes: '', bensParticipacoes: '', bensOutros: '', dividaPF: '',
+    areaExploracao: '', receitaRural: '', despesaRural: '', estoqueRebanho: '', dividaRural: '',
+    docs: {}, docPaths: {}, uploading: {},
+  };
+}
 
 // mirrors the contentType/size constraints enforced server-side in storage.rules,
 // so users get an immediate, friendly message instead of a raw Firebase error
@@ -2082,6 +2312,15 @@ document.addEventListener('DOMContentLoaded', () => {
     if (el.dataset.action === 'visita-row-field') {
       const idx = parseInt(el.dataset.idx, 10);
       ui.modal.draft.visitaRelatorio[el.dataset.table][idx][el.dataset.field] = el.value;
+      focusPreservingRender(renderModal);
+    }
+    if (el.dataset.action === 'faturamento-field') {
+      ui.modal.draft.faturamento[el.dataset.metric][el.dataset.ano] = el.value;
+      focusPreservingRender(renderModal);
+    }
+    if (el.dataset.action === 'endiv-row-field') {
+      const idx = parseInt(el.dataset.idx, 10);
+      ui.modal.draft.endividamentoPatrimonio[el.dataset.table][idx][el.dataset.field] = el.value;
       focusPreservingRender(renderModal);
     }
   });
