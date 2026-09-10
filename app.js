@@ -66,6 +66,7 @@ const OPERATIONS = {
   'CERES AGROBANK': { label: 'Ceres AgroFinance', tag: 'AGROFINANCE' },
   'CREDITO BTG PACTUAL': { label: 'Crédito BTG Pactual', tag: 'BTG PACTUAL' },
   'CONSORCIO': { label: 'Consórcio', tag: 'CONSÓRCIO' },
+  'IMPULSA': { label: 'Impulsa', tag: 'IMPULSA' },
 };
 // Ceres AgroFinance is the only operation with a required sub-type today.
 const AGROFINANCE_SUBTIPOS = ['Antecipação de Recebíveis', 'Semi-Estruturada', 'Estruturada'];
@@ -550,6 +551,10 @@ function isFormComplete(draft) {
     return !!profileKey && isChecklistComplete(draft, CHECKLISTS[profileKey]);
   }
 
+  if (draft.operation === 'IMPULSA') {
+    return !!(draft.nomeCFO && draft.nomeCO && draft.impulsaTelefone && draft.impulsaEmail && draft.docs.curva_abc_cliente);
+  }
+
   const type = personType(draft.documento);
   if (!type || !isValidDocumento(draft.documento)) return false;
   const base = requiredBaseDocs(draft).filter(d => !d.optional);
@@ -575,6 +580,14 @@ function isFormComplete(draft) {
 function buildDocumentsFromDraft(draft) {
   const profileKey = resolveProfile(draft);
   if (profileKey) return buildChecklistDocuments(draft, CHECKLISTS[profileKey]);
+
+  if (draft.operation === 'IMPULSA') {
+    const out = [];
+    const d = CK_DOCS.curva_abc_cliente;
+    out.push({ ...d, status: draft.docs[d.key] ? 'enviado' : 'pendente', fileName: draft.docs[d.key] || null, storagePath: draft.docPaths[d.key] || null });
+    (draft.extraDocs || []).forEach((f, i) => out.push({ key: 'extra_' + i, label: `Documento adicional: ${f.name}`, status: 'enviado', fileName: f.name, storagePath: f.path }));
+    return out;
+  }
 
   const type = personType(draft.documento);
   const out = [];
@@ -1039,7 +1052,16 @@ function RequestDetail(requestId, mode, returnTo) {
         <div class="field"><label>E-mail</label><input type="text" value="${esc(f.email || '')}" disabled></div>
         <div class="field"><label>Informações Adicionais (Parceiro)</label><input type="text" value="${esc(f.obs || 'N/A')}" disabled></div>
       </div>
-      ${(f.tipoPessoa || personType(f.documento)) === 'PJ' ? `
+      ${f.operation === 'IMPULSA' ? `
+        <div class="form-grid-2">
+          <div class="field"><label>Nome do CFO</label><input type="text" value="${esc(f.nomeCFO || 'N/A')}" disabled></div>
+          <div class="field"><label>Nome do CO</label><input type="text" value="${esc(f.nomeCO || 'N/A')}" disabled></div>
+        </div>
+        <div class="form-grid-2">
+          <div class="field"><label>Telefone dos Representantes</label><input type="text" value="${esc(f.impulsaTelefone || 'N/A')}" disabled></div>
+          <div class="field"><label>E-mail dos Representantes</label><input type="text" value="${esc(f.impulsaEmail || 'N/A')}" disabled></div>
+        </div>
+      ` : (f.tipoPessoa || personType(f.documento)) === 'PJ' ? `
         <div class="form-grid-2">
           <div class="field"><label>Subtipo de Operação</label><input type="text" value="${esc(f.subtipoOperacao || 'N/A')}" disabled></div>
           <div class="field"><label>Número de Sócios</label><input type="text" value="${esc(f.numeroSocios || 'N/A')}" disabled></div>
@@ -1695,6 +1717,7 @@ function ChecklistFormFields(draft, profile, uploadSlot) {
 
 function NovaSolicitacaoModal(draft) {
   const covered = COVERED_OPERATIONS.includes(draft.operation);
+  const isImpulsa = draft.operation === 'IMPULSA';
   const type = covered ? draft.tipoPessoa : personType(draft.documento);
   const profile = covered ? CHECKLISTS[resolveProfile(draft)] : null;
   const complete = isFormComplete(draft) && !draft.anyUploading;
@@ -1754,6 +1777,22 @@ function NovaSolicitacaoModal(draft) {
 
   if (covered) {
     if (profile) body += ChecklistFormFields(draft, profile, uploadSlot);
+  } else if (isImpulsa) {
+    body += `
+      <div class="section-divider"></div>
+      <div class="section-label">Representantes Impulsa</div>
+      <div class="form-grid-2">
+        <div class="field"><label>Nome do CFO</label><input type="text" value="${esc(draft.nomeCFO)}" data-action="draft-field" data-field="nomeCFO"></div>
+        <div class="field"><label>Nome do CO</label><input type="text" value="${esc(draft.nomeCO)}" data-action="draft-field" data-field="nomeCO"></div>
+      </div>
+      <div class="form-grid-2">
+        <div class="field"><label>Telefone dos Representantes</label><input type="text" placeholder="(00) 00000-0000" value="${esc(draft.impulsaTelefone)}" data-action="draft-field" data-field="impulsaTelefone"></div>
+        <div class="field"><label>E-mail dos Representantes</label><input type="email" placeholder="email@exemplo.com" value="${esc(draft.impulsaEmail)}" data-action="draft-field" data-field="impulsaEmail"></div>
+      </div>
+      <div class="section-divider"></div>
+      <div class="section-label">Anexar Documento Obrigatório</div>
+      ${uploadSlot('curva_abc_cliente', CK_DOCS.curva_abc_cliente.label, draft.docs, '', draft.uploading.curva_abc_cliente)}
+    `;
   } else if (type === 'PJ') {
     body += `
       <div class="section-divider"></div>
@@ -1965,6 +2004,7 @@ function emptyDraft() {
     possuiAvalista: '', certidaoPFPJ: '', numeroEmitentes: '',
     temConjugeAvalista: '', conjugeProfissao: '', conjugeContato: '',
     dadosBancarios: '', enderecoFazenda: '', nacionalidade: '',
+    nomeCFO: '', nomeCO: '', impulsaTelefone: '', impulsaEmail: '',
     confinaPlanilha: emptyConfinaPlanilha(), visitaRelatorio: emptyVisitaRelatorio(),
     faturamento: emptyFaturamento(), endividamentoPatrimonio: emptyEndividamentoPatrimonio(),
     bensImoveis: '', bensAplicacoes: '', bensParticipacoes: '', bensOutros: '', dividaPF: '',
