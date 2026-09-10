@@ -84,6 +84,17 @@ function capImpulsaVolume(rawVolume) {
   const capped = Math.min(original, IMPULSA_VOLUME_LIMIT);
   return { impulsaVolume: String(capped), impulsaVolumeOriginal: original > IMPULSA_VOLUME_LIMIT ? String(original) : null };
 }
+// Lets a partner correct their own request in place (fix a typo, replace a
+// rejected file, adjust a value) instead of forcing a whole new solicitação.
+// Keyed by request id so switching between requests re-seeds the draft from
+// that request's current saved form.
+function ensurePartnerEditDraft(r) {
+  if (ui.partner.editDraftId !== r.id) {
+    ui.partner.editDraft = { ...r.form };
+    ui.partner.editDraftId = r.id;
+  }
+  return ui.partner.editDraft;
+}
 function isImpulsaRowValid(row) {
   if (!row.nome || !row.documento || !isValidDocumento(row.documento)) return false;
   const volume = Number(row.volume) || 0;
@@ -527,7 +538,7 @@ function initialUI() {
     authError: '',
     authBusy: false,
     admin: { tab: 'parceiros', search: '', statusFilter: 'all', drill: null, commissionDraft: null },
-    partner: { screen: 'dashboard', requestId: null, search: '', filterOpen: false, statusFilter: 'all', operationFilter: 'all' },
+    partner: { screen: 'dashboard', requestId: null, search: '', filterOpen: false, statusFilter: 'all', operationFilter: 'all', editDraft: null, editDraftId: null },
     modal: null,
   };
 }
@@ -1076,6 +1087,26 @@ function RequestDetail(requestId, mode, returnTo) {
   const opMeta = OPERATIONS[r.operation] || { label: r.operation, tag: r.operation };
   const f = r.form || {};
 
+  // Once a request is approved it's a closed record; before that, the partner
+  // can fix their own mistakes (typo'd CPF, wrong value, swap a rejected file)
+  // in place instead of opening a brand-new solicitação.
+  const editable = mode === 'partner' && r.status !== 'aprovado';
+  const ed = editable ? ensurePartnerEditDraft(r) : f;
+  const efield = (label, field, opts = {}) => {
+    const raw = ed[field];
+    if (editable) {
+      return `<div class="field"><label>${label}</label><input type="text" ${opts.inputmode ? `inputmode="${opts.inputmode}"` : ''} value="${esc(raw ?? '')}" data-action="partner-edit-field" data-field="${field}"></div>`;
+    }
+    return `<div class="field"><label>${label}</label><input type="text" value="${esc(raw || (opts.fallback ?? 'N/A'))}" disabled></div>`;
+  };
+  const etextarea = (label, field) => {
+    const raw = ed[field];
+    if (editable) {
+      return `<div class="field"><label>${label}</label><textarea data-action="partner-edit-field" data-field="${field}">${esc(raw ?? '')}</textarea></div>`;
+    }
+    return `<div class="field"><label>${label}</label><textarea disabled>${esc(raw || 'N/A')}</textarea></div>`;
+  };
+
   const backAction = mode === 'admin'
     ? (returnTo?.type === 'partner-profile' ? `data-action="open-partner-profile" data-id="${returnTo.id}"` : `data-action="admin-back-to-tab" data-tab="pendencias"`)
     : `data-action="partner-goto" data-screen="dashboard"`;
@@ -1096,67 +1127,77 @@ function RequestDetail(requestId, mode, returnTo) {
       <div class="brand-mark">${opMeta.tag}</div>
       <h2 class="serif">${esc(opMeta.label)}</h2>
       ${f.agroSubtipo ? `<div class="mono" style="color:var(--muted);font-size:12px;margin-top:-10px;margin-bottom:14px;">${esc(f.agroSubtipo)}</div>` : ''}
-      <div class="client-name serif">${esc(f.nome || '—')}</div>
-      <div class="client-doc">${esc(f.documento || '—')}</div>
+      <div class="client-name serif">${esc((editable ? ed.nome : f.nome) || '—')}</div>
+      <div class="client-doc">${esc((editable ? ed.documento : f.documento) || '—')}</div>
     </div>
+
+    ${editable ? `
+      <div class="feedback-banner" style="background:var(--primary-soft, #1c2b28);">
+        <b>Editar Solicitação</b>Encontrou um dado errado ou quer atualizar uma informação? Corrija os campos abaixo e clique em "Salvar Alterações".
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:14px;">
+        <button class="btn btn-primary" data-action="save-request-edit" data-id="${r.id}">💾 Salvar Alterações</button>
+      </div>
+    ` : ''}
 
     <div class="info-block">
       <div class="form-grid-2">
-        <div class="field"><label>CPF ou CNPJ</label><input type="text" value="${esc(f.documento || '')}" disabled></div>
-        <div class="field"><label>Telefone</label><input type="text" value="${esc(f.telefone || '')}" disabled></div>
+        ${efield('Nome / Razão Social', 'nome', { fallback: '' })}
+        ${efield('CPF ou CNPJ', 'documento', { fallback: '' })}
       </div>
       <div class="form-grid-2">
-        <div class="field"><label>E-mail</label><input type="text" value="${esc(f.email || '')}" disabled></div>
-        <div class="field"><label>Informações Adicionais (Parceiro)</label><input type="text" value="${esc(f.obs || 'N/A')}" disabled></div>
+        ${efield('Telefone', 'telefone', { fallback: '' })}
+        ${efield('E-mail', 'email', { fallback: '' })}
       </div>
+      ${efield('Informações Adicionais (Parceiro)', 'obs')}
       ${f.operation === 'IMPULSA' ? `
         <div class="form-grid-2">
           <div class="field"><label>Modelo</label><input type="text" value="${f.impulsaModelo === 'lote' ? 'Em Lote' : 'Individual'}" disabled></div>
-          <div class="field"><label>Volume (limitado a ${fmtBRL(IMPULSA_VOLUME_LIMIT)})</label><input type="text" value="${fmtBRL(f.impulsaVolume)}" disabled></div>
+          ${efield(`Volume (limitado a ${fmtBRL(IMPULSA_VOLUME_LIMIT)})`, 'impulsaVolume', { inputmode: 'decimal' })}
         </div>
         ${f.impulsaVolumeOriginal ? `
           <div class="feedback-banner"><b>Atenção</b>O parceiro solicitou originalmente ${fmtBRL(f.impulsaVolumeOriginal)} — valor acima do teto do Impulsiona. Oriente-o a abrir uma solicitação manual com a documentação completa para o volume real.</div>
         ` : ''}
-        <div class="field"><label>Histórico Comercial</label><textarea disabled>${esc(f.impulsaHistorico || 'N/A')}</textarea></div>
+        ${etextarea('Histórico Comercial', 'impulsaHistorico')}
       ` : (f.tipoPessoa || personType(f.documento)) === 'PJ' ? `
         <div class="form-grid-2">
-          <div class="field"><label>Subtipo de Operação</label><input type="text" value="${esc(f.subtipoOperacao || 'N/A')}" disabled></div>
+          ${efield('Subtipo de Operação', 'subtipoOperacao')}
           <div class="field"><label>Número de Sócios</label><input type="text" value="${esc(f.numeroSocios || 'N/A')}" disabled></div>
         </div>
         <div class="form-grid-2">
-          <div class="field"><label>Possui Procurador?</label><input type="text" value="${esc(f.possuiProcurador || 'N/A')}" disabled></div>
-          <div class="field"><label>Informações do Procurador</label><input type="text" value="${esc(f.infoProcurador || 'N/A')}" disabled></div>
+          ${efield('Possui Procurador?', 'possuiProcurador')}
+          ${efield('Informações do Procurador', 'infoProcurador')}
         </div>
       ` : `
         <div class="form-grid-2">
-          <div class="field"><label>Profissão</label><input type="text" value="${esc(f.profissao || 'N/A')}" disabled></div>
-          <div class="field"><label>Possui ICP para assinatura?</label><input type="text" value="${esc(f.icp || 'N/A')}" disabled></div>
+          ${efield('Profissão', 'profissao')}
+          ${efield('Possui ICP para assinatura?', 'icp')}
         </div>
         <div class="form-grid-2">
-          <div class="field"><label>Estado Civil</label><input type="text" value="${esc(f.estadoCivil || 'N/A')}" disabled></div>
-          <div class="field"><label>Possui Avalista?</label><input type="text" value="${esc(f.possuiAvalista || 'N/A')}" disabled></div>
+          ${efield('Estado Civil', 'estadoCivil')}
+          ${efield('Possui Avalista?', 'possuiAvalista')}
         </div>
       `}
       ${f.enderecoInstitucional ? `
         <div class="form-grid-2">
-          <div class="field"><label>Endereço Institucional</label><input type="text" value="${esc(f.enderecoInstitucional)}" disabled></div>
+          ${efield('Endereço Institucional', 'enderecoInstitucional')}
         </div>
       ` : ''}
       ${f.enderecoFazenda || f.dadosBancarios ? `
         <div class="form-grid-2">
-          <div class="field"><label>Endereço da Fazenda</label><input type="text" value="${esc(f.enderecoFazenda || 'N/A')}" disabled></div>
-          <div class="field"><label>Dados Bancários</label><input type="text" value="${esc(f.dadosBancarios || 'N/A')}" disabled></div>
+          ${efield('Endereço da Fazenda', 'enderecoFazenda')}
+          ${efield('Dados Bancários', 'dadosBancarios')}
         </div>
       ` : ''}
       ${f.nacionalidade ? `
         <div class="form-grid-2">
-          <div class="field"><label>Nacionalidade</label><input type="text" value="${esc(f.nacionalidade)}" disabled></div>
+          ${efield('Nacionalidade', 'nacionalidade')}
         </div>
       ` : ''}
       ${f.temConjugeAvalista ? `
         <div class="form-grid-2">
-          <div class="field"><label>Possui Cônjuge/Avalista?</label><input type="text" value="${esc(f.temConjugeAvalista)}" disabled></div>
-          <div class="field"><label>Profissão do Cônjuge/Avalista</label><input type="text" value="${esc(f.conjugeProfissao || 'N/A')}" disabled></div>
+          ${efield('Possui Cônjuge/Avalista?', 'temConjugeAvalista')}
+          ${efield('Profissão do Cônjuge/Avalista', 'conjugeProfissao')}
         </div>
       ` : ''}
     </div>
@@ -2413,6 +2454,23 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         break;
       }
+      case 'save-request-edit': {
+        const r = db.requests.find(x => x.id === el.dataset.id);
+        const draft = ui.partner.editDraft;
+        if (!r || !draft) break;
+        if (!draft.nome || !draft.nome.trim()) { toast('Informe o nome / razão social.'); break; }
+        if (!draft.documento || !isValidDocumento(draft.documento)) { toast('CPF/CNPJ inválido.'); break; }
+        const updatedForm = { ...r.form, ...draft };
+        if (r.operation === 'IMPULSA') Object.assign(updatedForm, capImpulsaVolume(updatedForm.impulsaVolume));
+        try {
+          await fbDb.collection('requests').doc(r.id).update({ form: updatedForm, updatedAt: FieldValue.serverTimestamp() });
+          toast('Alterações salvas.');
+          render();
+        } catch (err) {
+          toast('Não foi possível salvar: ' + err.message);
+        }
+        break;
+      }
       case 'open-edit-cadastro': ui.modal = { type: 'edit-cadastro' }; renderModal(); break;
       case 'save-edit-cadastro': {
         await fbDb.collection('partners').doc(el.dataset.id).update({
@@ -2549,6 +2607,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (el.dataset.action === 'commission-field') {
       ui.admin.commissionDraft[el.dataset.field] = el.value;
+      focusPreservingRender(renderPartial);
+    }
+    if (el.dataset.action === 'partner-edit-field') {
+      if (ui.partner.editDraft) ui.partner.editDraft[el.dataset.field] = el.value;
       focusPreservingRender(renderPartial);
     }
     if (el.dataset.action === 'confina-planilha-field') {
