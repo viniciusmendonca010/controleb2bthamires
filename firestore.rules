@@ -28,6 +28,9 @@ service cloud.firestore {
       // partner can update their own request (e.g. upload a doc admin asked for),
       // admin can update any (status changes, feedback, doc rejection)
       allow update: if isAdmin() || (isSignedIn() && resource.data.partnerId == request.auth.uid);
+      // partner can delete their own request if they change their mind; admin can
+      // delete any (e.g. cleaning up a duplicate/erroneous one).
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.partnerId == request.auth.uid);
     }
 
     // error reports

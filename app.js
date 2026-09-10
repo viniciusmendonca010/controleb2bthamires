@@ -1137,6 +1137,11 @@ function RequestDetail(requestId, mode, returnTo) {
 
     ${mode === 'admin' ? CommissionPanel(r) : ''}
     ${mode === 'admin' ? AdminControlPanel(r) : ''}
+    ${mode === 'partner' ? `
+      <div style="text-align:center;margin-top:28px;">
+        <button class="btn-danger-text" data-action="delete-request" data-id="${r.id}">🗑 Excluir esta solicitação</button>
+      </div>
+    ` : ''}
   `;
 }
 
@@ -1148,8 +1153,8 @@ function CommissionPanel(r) {
   const categoryFields = {
     antecipacao_semi: `
       <div class="form-grid-2">
-        <div class="field"><label>Valor Efetivamente Operado (R$)</label><input type="number" step="0.01" value="${esc(cd.valorOperado)}" data-action="commission-field" data-field="valorOperado"></div>
-        <div class="field"><label>Prazo da Operação (meses)</label><input type="number" value="${esc(cd.prazoMeses)}" data-action="commission-field" data-field="prazoMeses"></div>
+        <div class="field"><label>Valor Efetivamente Operado (R$)</label><input type="text" inputmode="decimal" value="${esc(cd.valorOperado)}" data-action="commission-field" data-field="valorOperado"></div>
+        <div class="field"><label>Prazo da Operação (meses)</label><input type="text" inputmode="numeric" value="${esc(cd.prazoMeses)}" data-action="commission-field" data-field="prazoMeses"></div>
       </div>
       <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;margin:4px 0 14px;">
         <input type="checkbox" data-action="commission-checkbox" data-field="ativacaoNovoCliente" ${cd.ativacaoNovoCliente ? 'checked' : ''}>
@@ -1163,17 +1168,17 @@ function CommissionPanel(r) {
             ${Object.keys(COMMISSION_GRAOS_RATES).map(p => `<option ${cd.produto === p ? 'selected' : ''}>${p} (${(COMMISSION_GRAOS_RATES[p] * 100).toFixed(2)}% sobre VOP)</option>`).join('')}
           </select>
         </div>
-        <div class="field"><label>VOP — Volume da Operação (R$)</label><input type="number" step="0.01" value="${esc(cd.vop)}" data-action="commission-field" data-field="vop"></div>
+        <div class="field"><label>VOP — Volume da Operação (R$)</label><input type="text" inputmode="decimal" value="${esc(cd.vop)}" data-action="commission-field" data-field="vop"></div>
       </div>
     `,
     estruturada: `
       <div class="form-grid-2">
-        <div class="field"><label>Success Fee recebido pela Ceres, líquido de impostos (R$)</label><input type="number" step="0.01" value="${esc(cd.successFee)}" data-action="commission-field" data-field="successFee"></div>
-        <div class="field"><label>% acordado com o Parceiro (até 40%)</label><input type="number" min="0" max="40" step="0.1" value="${esc(cd.percentualParceiro)}" data-action="commission-field" data-field="percentualParceiro"></div>
+        <div class="field"><label>Success Fee recebido pela Ceres, líquido de impostos (R$)</label><input type="text" inputmode="decimal" value="${esc(cd.successFee)}" data-action="commission-field" data-field="successFee"></div>
+        <div class="field"><label>% acordado com o Parceiro (até 40%)</label><input type="text" inputmode="decimal" value="${esc(cd.percentualParceiro)}" data-action="commission-field" data-field="percentualParceiro"></div>
       </div>
     `,
     nao_credito: `
-      <div class="field"><label>Receita Líquida auferida pela Ceres (R$)</label><input type="number" step="0.01" value="${esc(cd.receitaLiquida)}" data-action="commission-field" data-field="receitaLiquida"></div>
+      <div class="field"><label>Receita Líquida auferida pela Ceres (R$)</label><input type="text" inputmode="decimal" value="${esc(cd.receitaLiquida)}" data-action="commission-field" data-field="receitaLiquida"></div>
     `,
   };
 
@@ -1369,7 +1374,7 @@ function renderModal() {
 function ConfinaPlanilhaSection(p, readonly) {
   const cell = (metricKey, anoKey) => readonly
     ? esc(p[metricKey]?.[anoKey] || '—')
-    : `<input type="number" step="0.01" value="${esc(p[metricKey][anoKey])}" data-action="confina-planilha-field" data-metric="${metricKey}" data-ano="${anoKey}" style="width:88px;padding:6px;font-size:12px;">`;
+    : `<input type="text" inputmode="decimal" value="${esc(p[metricKey][anoKey])}" data-action="confina-planilha-field" data-metric="${metricKey}" data-ano="${anoKey}" style="width:88px;padding:6px;font-size:12px;">`;
   const computedRow = (label, unid, getVal, fmt) => `
     <tr>
       <td style="padding:6px;font-weight:700;">${esc(label)}</td>
@@ -1418,7 +1423,7 @@ function ConfinaPlanilhaSection(p, readonly) {
 function VisitaRelatorioSection(v, readonly) {
   const inp = (field, type = 'text') => readonly
     ? esc(v[field] || '—')
-    : `<input type="${type}" ${type === 'number' ? 'step="0.01"' : ''} value="${esc(v[field])}" data-action="visita-field" data-field="${field}">`;
+    : `<input type="text" ${type === 'number' ? 'inputmode="decimal"' : ''} value="${esc(v[field])}" data-action="visita-field" data-field="${field}">`;
   const sel = (field, options) => readonly
     ? esc(v[field] || '—')
     : `<select data-action="visita-field" data-field="${field}"><option value="">Selecione...</option>${options.map(o => `<option ${v[field] === o ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
@@ -1430,7 +1435,7 @@ function VisitaRelatorioSection(v, readonly) {
         <tbody>
           ${rows.map((row, i) => `
             <tr>
-              ${cols.map(c => `<td style="padding:4px;">${readonly ? esc(row[c.key] || '—') : `<input type="${c.type || 'text'}" value="${esc(row[c.key])}" data-action="visita-row-field" data-table="${tableKey}" data-idx="${i}" data-field="${c.key}" style="width:100%;padding:6px;font-size:12px;">`}</td>`).join('')}
+              ${cols.map(c => `<td style="padding:4px;">${readonly ? esc(row[c.key] || '—') : `<input type="text" ${c.type === 'number' ? 'inputmode="decimal"' : ''} value="${esc(row[c.key])}" data-action="visita-row-field" data-table="${tableKey}" data-idx="${i}" data-field="${c.key}" style="width:100%;padding:6px;font-size:12px;">`}</td>`).join('')}
             </tr>
           `).join('')}
         </tbody>
@@ -1469,7 +1474,7 @@ function VisitaRelatorioSection(v, readonly) {
 function FaturamentoSection(f, readonly) {
   const cell = (mes, ano) => readonly
     ? esc(f[mes]?.[ano] || '—')
-    : `<input type="number" step="0.01" value="${esc(f[mes][ano])}" data-action="faturamento-field" data-metric="${mes}" data-ano="${ano}" style="width:88px;padding:6px;font-size:12px;">`;
+    : `<input type="text" inputmode="decimal" value="${esc(f[mes][ano])}" data-action="faturamento-field" data-metric="${mes}" data-ano="${ano}" style="width:88px;padding:6px;font-size:12px;">`;
   const pct = (v) => v === null ? '—' : (v * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '%';
   return `
     <div class="section-divider"></div>
@@ -1492,7 +1497,7 @@ function FaturamentoSection(f, readonly) {
 function EndividamentoPatrimonioSection(ep, readonly) {
   const rowInput = (table, i, field, type = 'text') => readonly
     ? esc(ep[table][i][field] || '—')
-    : `<input type="${type}" ${type === 'number' ? 'step="0.01"' : ''} value="${esc(ep[table][i][field])}" data-action="endiv-row-field" data-table="${table}" data-idx="${i}" data-field="${field}" style="width:100%;padding:6px;font-size:12px;">`;
+    : `<input type="text" ${type === 'number' ? 'inputmode="decimal"' : ''} value="${esc(ep[table][i][field])}" data-action="endiv-row-field" data-table="${table}" data-idx="${i}" data-field="${field}" style="width:100%;padding:6px;font-size:12px;">`;
   const totals = calcPatrimonioTotais(ep);
   const n2 = (v) => (v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
   return `
@@ -1557,7 +1562,7 @@ function EndividamentoPatrimonioSection(ep, readonly) {
 function PatrimonioPessoalFields(obj, actionAttrs, readonly) {
   const f = (field, label) => readonly
     ? `<div class="field"><label>${label}</label><input type="text" value="${esc(obj[field])}" disabled></div>`
-    : `<div class="field"><label>${label}</label><input type="number" step="0.01" value="${esc(obj[field])}" ${actionAttrs} data-field="${field}"></div>`;
+    : `<div class="field"><label>${label}</label><input type="text" inputmode="decimal" value="${esc(obj[field])}" ${actionAttrs} data-field="${field}"></div>`;
   return `
     <div class="section-label" style="margin-top:14px;">Patrimônio Pessoal</div>
     <div class="form-grid-2">${f('bensImoveis', 'Imóveis e Terrenos (R$)')}${f('bensAplicacoes', 'Aplicações e Disponibilidades (R$)')}</div>
@@ -1620,7 +1625,7 @@ function ChecklistFormFields(draft, profile, uploadSlot) {
     html += `
       <div class="section-divider"></div>
       <div class="section-label">Sócios</div>
-      <div class="field"><label>Número de Sócios <span class="req">*</span></label><input type="number" min="1" value="${esc(draft.numeroSocios)}" data-action="draft-field" data-field="numeroSocios"></div>
+      <div class="field"><label>Número de Sócios <span class="req">*</span></label><input type="text" inputmode="numeric" value="${esc(draft.numeroSocios)}" data-action="draft-field" data-field="numeroSocios"></div>
       ${(draft.socios || []).map((s, i) => `
         <div class="subsection">
           <div class="section-label">Sócio ${i + 1}</div>
@@ -1630,7 +1635,7 @@ function ChecklistFormFields(draft, profile, uploadSlot) {
             <div class="field"><label>Profissão</label><input type="text" value="${esc(s.profissao)}" data-action="draft-socio-field" data-idx="${i}" data-field="profissao"></div>
           </div>
           <div class="form-grid-2">
-            <div class="field"><label>E-mail</label><input type="email" value="${esc(s.email)}" data-action="draft-socio-field" data-idx="${i}" data-field="email"></div>
+            <div class="field"><label>E-mail</label><input type="text" inputmode="email" value="${esc(s.email)}" data-action="draft-socio-field" data-idx="${i}" data-field="email"></div>
             <div class="field"><label>Telefone</label><input type="text" value="${esc(s.telefone)}" data-action="draft-socio-field" data-idx="${i}" data-field="telefone"></div>
           </div>
           ${profile.hasSocioExtra ? `
@@ -1696,7 +1701,7 @@ function ChecklistFormFields(draft, profile, uploadSlot) {
         </select>
       </div>
       ${draft.certidaoPFPJ ? `
-        <div class="field"><label>Número de Emitentes <span class="req">*</span></label><input type="number" min="1" value="${esc(draft.numeroEmitentes)}" data-action="draft-field" data-field="numeroEmitentes"></div>
+        <div class="field"><label>Número de Emitentes <span class="req">*</span></label><input type="text" inputmode="numeric" value="${esc(draft.numeroEmitentes)}" data-action="draft-field" data-field="numeroEmitentes"></div>
         ${(draft.emitentes || []).map((em, i) => `
           <div class="subsection">
             <div class="section-label">Emitente ${i + 1} (e seu cônjuge)</div>
@@ -1772,7 +1777,7 @@ function NovaSolicitacaoModal(draft) {
       </div>
       <div class="field"><label>Telefone</label><input type="text" placeholder="(00) 00000-0000" value="${esc(draft.telefone)}" data-action="draft-field" data-field="telefone"></div>
     </div>
-    <div class="field"><label>E-mail</label><input type="email" placeholder="email@exemplo.com" value="${esc(draft.email)}" data-action="draft-field" data-field="email"></div>
+    <div class="field"><label>E-mail</label><input type="text" inputmode="email" placeholder="email@exemplo.com" value="${esc(draft.email)}" data-action="draft-field" data-field="email"></div>
   `;
 
   if (covered) {
@@ -1787,7 +1792,7 @@ function NovaSolicitacaoModal(draft) {
       </div>
       <div class="form-grid-2">
         <div class="field"><label>Telefone dos Representantes</label><input type="text" placeholder="(00) 00000-0000" value="${esc(draft.impulsaTelefone)}" data-action="draft-field" data-field="impulsaTelefone"></div>
-        <div class="field"><label>E-mail dos Representantes</label><input type="email" placeholder="email@exemplo.com" value="${esc(draft.impulsaEmail)}" data-action="draft-field" data-field="impulsaEmail"></div>
+        <div class="field"><label>E-mail dos Representantes</label><input type="text" inputmode="email" placeholder="email@exemplo.com" value="${esc(draft.impulsaEmail)}" data-action="draft-field" data-field="impulsaEmail"></div>
       </div>
       <div class="section-divider"></div>
       <div class="section-label">Anexar Documento Obrigatório</div>
@@ -1799,7 +1804,7 @@ function NovaSolicitacaoModal(draft) {
       <div class="section-label">Informações Adicionais (Pessoa Jurídica)</div>
       <div class="form-grid-2">
         <div class="field"><label>Subtipo de Operação</label><input type="text" value="${esc(draft.subtipoOperacao)}" data-action="draft-field" data-field="subtipoOperacao"></div>
-        <div class="field"><label>Número de Sócios</label><input type="number" value="${esc(draft.numeroSocios)}" data-action="draft-field" data-field="numeroSocios"></div>
+        <div class="field"><label>Número de Sócios</label><input type="text" inputmode="numeric" value="${esc(draft.numeroSocios)}" data-action="draft-field" data-field="numeroSocios"></div>
       </div>
       <div class="field"><label>Informações dos Sócios</label><textarea data-action="draft-field" data-field="infoSocios">${esc(draft.infoSocios)}</textarea></div>
       <div class="form-grid-2">
@@ -1859,14 +1864,14 @@ function NovaSolicitacaoModal(draft) {
         </select>
       </div>
       ${draft.certidaoPFPJ ? `
-        <div class="field"><label>Número de Emitentes <span class="req">*</span></label><input type="number" min="1" value="${esc(draft.numeroEmitentes)}" data-action="draft-field" data-field="numeroEmitentes"></div>
+        <div class="field"><label>Número de Emitentes <span class="req">*</span></label><input type="text" inputmode="numeric" value="${esc(draft.numeroEmitentes)}" data-action="draft-field" data-field="numeroEmitentes"></div>
         ${(draft.emitentes || []).map((em, i) => `
           <div class="subsection">
             <div class="section-label">Dados do Emitente ${i + 1}</div>
             <div class="field"><label>Nome do Emitente</label><input type="text" value="${esc(em.nome)}" data-action="draft-emitente-field" data-idx="${i}" data-field="nome"></div>
             <div class="form-grid-2">
               <div class="field"><label>CPF do Emitente</label><input type="text" value="${esc(em.cpf)}" data-action="draft-emitente-field" data-idx="${i}" data-field="cpf"></div>
-              <div class="field"><label>E-mail do Emitente</label><input type="email" value="${esc(em.email)}" data-action="draft-emitente-field" data-idx="${i}" data-field="email"></div>
+              <div class="field"><label>E-mail do Emitente</label><input type="text" inputmode="email" value="${esc(em.email)}" data-action="draft-emitente-field" data-idx="${i}" data-field="email"></div>
             </div>
             <div class="form-grid-2">
               <div class="field"><label>Telefone do Emitente</label><input type="text" value="${esc(em.telefone)}" data-action="draft-emitente-field" data-idx="${i}" data-field="telefone"></div>
@@ -2247,6 +2252,20 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'partner-goto': ui.partner.screen = el.dataset.screen; render(); break;
       case 'open-request-detail-partner': ui.partner.requestId = el.dataset.id; ui.partner.screen = 'request-detail'; render(); break;
       case 'toggle-partner-filters': ui.partner.filterOpen = !ui.partner.filterOpen; render(); break;
+      case 'delete-request': {
+        if (!confirm('Excluir esta solicitação? Essa ação não pode ser desfeita.')) break;
+        const id = el.dataset.id;
+        try {
+          await fbDb.collection('requests').doc(id).delete();
+          toast('Solicitação excluída.');
+          ui.partner.requestId = null;
+          ui.partner.screen = 'dashboard';
+          render();
+        } catch (err) {
+          toast('Não foi possível excluir: ' + err.message);
+        }
+        break;
+      }
       case 'open-edit-cadastro': ui.modal = { type: 'edit-cadastro' }; renderModal(); break;
       case 'save-edit-cadastro': {
         await fbDb.collection('partners').doc(el.dataset.id).update({
