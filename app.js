@@ -66,7 +66,7 @@ const OPERATIONS = {
   'CERES AGROBANK': { label: 'Ceres AgroFinance', tag: 'AGROFINANCE' },
   'CREDITO BTG PACTUAL': { label: 'Crédito BTG Pactual', tag: 'BTG PACTUAL' },
   'CONSORCIO': { label: 'Consórcio', tag: 'CONSÓRCIO' },
-  'IMPULSA': { label: 'Impulsa', tag: 'IMPULSA' },
+  'IMPULSA': { label: 'Impulsiona', tag: 'IMPULSIONA' },
 };
 // Ceres AgroFinance is the only operation with a required sub-type today.
 const AGROFINANCE_SUBTIPOS = ['Antecipação de Recebíveis', 'Semi-Estruturada', 'Estruturada'];
@@ -1785,7 +1785,7 @@ function NovaSolicitacaoModal(draft) {
   } else if (isImpulsa) {
     body += `
       <div class="section-divider"></div>
-      <div class="section-label">Representantes Impulsa</div>
+      <div class="section-label">Representantes Impulsiona</div>
       <div class="form-grid-2">
         <div class="field"><label>Nome do CFO</label><input type="text" value="${esc(draft.nomeCFO)}" data-action="draft-field" data-field="nomeCFO"></div>
         <div class="field"><label>Nome do CO</label><input type="text" value="${esc(draft.nomeCO)}" data-action="draft-field" data-field="nomeCO"></div>
