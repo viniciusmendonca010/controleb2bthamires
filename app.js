@@ -70,6 +70,19 @@ const OPERATIONS = {
 };
 // Ceres AgroFinance is the only operation with a required sub-type today.
 const AGROFINANCE_SUBTIPOS = ['Antecipação de Recebíveis', 'Semi-Estruturada', 'Estruturada'];
+// Impulsiona: above this requested volume, Balanço/DRE 2025 become required.
+const IMPULSA_VOLUME_LIMIT = 2000000;
+const IMPULSA_LOTE_ROW_LIMIT = 200;
+function isImpulsaRowValid(row) {
+  if (!row.nome || !row.documento || !isValidDocumento(row.documento)) return false;
+  const volume = Number(row.volume) || 0;
+  if (!row.volume || volume <= 0) return false;
+  if (volume > IMPULSA_VOLUME_LIMIT && (!row.docs.impulsa_balanco_2025 || !row.docs.impulsa_dre_2025)) return false;
+  return true;
+}
+function emptyImpulsaLoteRow() {
+  return { nome: '', documento: '', volume: '', historico: '', telefone: '', email: '', docs: {}, docPaths: {}, uploading: {} };
+}
 const STATUS_META = {
   em_analise: { label: 'Em Análise', cls: 'analise' },
   aprovado: { label: 'Aprovado', cls: 'approved' },
@@ -134,6 +147,11 @@ const CK_DOCS = {
   planilha_confina: { key: 'planilha_confina', label: 'Planilha Produtor Agrícola/Confina (modelo Ceres)' },
   curva_abc_cliente: { key: 'curva_abc_cliente', label: 'Curva ABC Cliente' },
   curva_abc_fornecedor: { key: 'curva_abc_fornecedor', label: 'Curva ABC Fornecedor' },
+  impulsa_balanco_2025: { key: 'impulsa_balanco_2025', label: 'Balanço 2025' },
+  impulsa_dre_2025: { key: 'impulsa_dre_2025', label: 'DRE 2025' },
+  impulsa_balancete_2026: { key: 'impulsa_balancete_2026', label: 'Balancete 2026', optional: true },
+  impulsa_balanco_2024: { key: 'impulsa_balanco_2024', label: 'Balanço 2024', optional: true },
+  impulsa_dre_2024: { key: 'impulsa_dre_2024', label: 'DRE 2024', optional: true },
   apresentacao_institucional: { key: 'apresentacao_institucional', label: 'Apresentação Institucional ou Descrição da Companhia' },
   abertura_receita: { key: 'abertura_receita', label: 'Abertura de receita (preço, quantidade e margem de contribuição por linha)' },
   projecao_operacao: { key: 'projecao_operacao', label: 'Projeção — período da operação proposta' },
@@ -564,17 +582,27 @@ function emitenteDocs(emitente) {
   return docs;
 }
 function isFormComplete(draft) {
-  if (!draft.operation || !draft.nome || !draft.documento || !draft.telefone || !draft.email) return false;
+  if (!draft.operation) return false;
+
+  if (draft.operation === 'IMPULSA') {
+    if (draft.impulsaModelo === 'individual') {
+      if (!draft.nome || !draft.documento || !isValidDocumento(draft.documento) || !draft.impulsaVolume) return false;
+      if (Number(draft.impulsaVolume) > IMPULSA_VOLUME_LIMIT && (!draft.docs.impulsa_balanco_2025 || !draft.docs.impulsa_dre_2025)) return false;
+      return true;
+    }
+    if (draft.impulsaModelo === 'lote') {
+      return draft.impulsaLoteRows.length > 0 && draft.impulsaLoteRows.every(isImpulsaRowValid);
+    }
+    return false;
+  }
+
+  if (!draft.nome || !draft.documento || !draft.telefone || !draft.email) return false;
   if (draft.operation === 'CERES AGROBANK' && !draft.agroSubtipo) return false;
 
   if (COVERED_OPERATIONS.includes(draft.operation)) {
     if (!draft.tipoPessoa || !isValidDocumentoForTipo(draft.documento, draft.tipoPessoa)) return false;
     const profileKey = resolveProfile(draft);
     return !!profileKey && isChecklistComplete(draft, CHECKLISTS[profileKey]);
-  }
-
-  if (draft.operation === 'IMPULSA') {
-    return !!(draft.nomeCFO && draft.nomeCO && draft.impulsaTelefone && draft.impulsaEmail && draft.docs.curva_abc_cliente);
   }
 
   const type = personType(draft.documento);
@@ -605,8 +633,12 @@ function buildDocumentsFromDraft(draft) {
 
   if (draft.operation === 'IMPULSA') {
     const out = [];
-    const d = CK_DOCS.curva_abc_cliente;
-    out.push({ ...d, status: draft.docs[d.key] ? 'enviado' : 'pendente', fileName: draft.docs[d.key] || null, storagePath: draft.docPaths[d.key] || null });
+    if (Number(draft.impulsaVolume) > IMPULSA_VOLUME_LIMIT) {
+      ['impulsa_balanco_2025', 'impulsa_dre_2025', 'impulsa_balancete_2026', 'impulsa_balanco_2024', 'impulsa_dre_2024'].forEach(k => {
+        const d = CK_DOCS[k];
+        out.push({ ...d, status: draft.docs[k] ? 'enviado' : 'pendente', fileName: draft.docs[k] || null, storagePath: draft.docPaths[k] || null });
+      });
+    }
     (draft.extraDocs || []).forEach((f, i) => out.push({ key: 'extra_' + i, label: `Documento adicional: ${f.name}`, status: 'enviado', fileName: f.name, storagePath: f.path }));
     return out;
   }
@@ -624,6 +656,16 @@ function buildDocumentsFromDraft(draft) {
     }
   }
   (draft.extraDocs || []).forEach((f, i) => out.push({ key: 'extra_' + i, label: `Documento adicional: ${f.name}`, status: 'enviado', fileName: f.name, storagePath: f.path }));
+  return out;
+}
+function buildImpulsaLoteRowDocuments(row) {
+  const out = [];
+  if (Number(row.volume) > IMPULSA_VOLUME_LIMIT) {
+    ['impulsa_balanco_2025', 'impulsa_dre_2025', 'impulsa_balancete_2026', 'impulsa_balanco_2024', 'impulsa_dre_2024'].forEach(k => {
+      const d = CK_DOCS[k];
+      out.push({ ...d, status: row.docs[k] ? 'enviado' : 'pendente', fileName: row.docs[k] || null, storagePath: row.docPaths[k] || null });
+    });
+  }
   return out;
 }
 
@@ -1076,13 +1118,10 @@ function RequestDetail(requestId, mode, returnTo) {
       </div>
       ${f.operation === 'IMPULSA' ? `
         <div class="form-grid-2">
-          <div class="field"><label>Nome do CFO</label><input type="text" value="${esc(f.nomeCFO || 'N/A')}" disabled></div>
-          <div class="field"><label>Nome do CO</label><input type="text" value="${esc(f.nomeCO || 'N/A')}" disabled></div>
+          <div class="field"><label>Modelo</label><input type="text" value="${f.impulsaModelo === 'lote' ? 'Em Lote' : 'Individual'}" disabled></div>
+          <div class="field"><label>Volume Solicitado</label><input type="text" value="${fmtBRL(f.impulsaVolume)}" disabled></div>
         </div>
-        <div class="form-grid-2">
-          <div class="field"><label>Telefone dos Representantes</label><input type="text" value="${esc(f.impulsaTelefone || 'N/A')}" disabled></div>
-          <div class="field"><label>E-mail dos Representantes</label><input type="text" value="${esc(f.impulsaEmail || 'N/A')}" disabled></div>
-        </div>
+        <div class="field"><label>Histórico Comercial</label><textarea disabled>${esc(f.impulsaHistorico || 'N/A')}</textarea></div>
       ` : (f.tipoPessoa || personType(f.documento)) === 'PJ' ? `
         <div class="form-grid-2">
           <div class="field"><label>Subtipo de Operação</label><input type="text" value="${esc(f.subtipoOperacao || 'N/A')}" disabled></div>
@@ -1742,6 +1781,116 @@ function ChecklistFormFields(draft, profile, uploadSlot) {
   return html;
 }
 
+function ImpulsaFormFields(draft, uploadSlot) {
+  let html = `
+    <div class="section-divider"></div>
+    <div class="section-label">Modelo da Solicitação</div>
+    <div class="field">
+      <div class="radio-row">
+        <label><input type="radio" name="ns-impulsa-modelo" value="individual" data-action="draft-field" data-field="impulsaModelo" ${draft.impulsaModelo === 'individual' ? 'checked' : ''}> Individual</label>
+        <label><input type="radio" name="ns-impulsa-modelo" value="lote" data-action="draft-field" data-field="impulsaModelo" ${draft.impulsaModelo === 'lote' ? 'checked' : ''}> Em Lote (planilha)</label>
+      </div>
+    </div>
+  `;
+  if (draft.impulsaModelo === 'individual') html += ImpulsaIndividualFields(draft, uploadSlot);
+  else if (draft.impulsaModelo === 'lote') html += ImpulsaLoteFields(draft, uploadSlot);
+  return html;
+}
+
+function ImpulsaIndividualFields(draft, uploadSlot) {
+  const volume = Number(draft.impulsaVolume) || 0;
+  const docDigits = (draft.documento || '').replace(/\D/g, '');
+  const docInvalid = (docDigits.length === 11 || docDigits.length === 14) && !isValidDocumento(draft.documento);
+  return `
+    <div class="section-divider"></div>
+    <div class="section-label">Dados do Cliente</div>
+    <div class="field"><label>Nome do Cliente ou Razão Social</label><input type="text" value="${esc(draft.nome)}" data-action="draft-field" data-field="nome"></div>
+    <div class="form-grid-2">
+      <div class="field">
+        <label>CPF ou CNPJ</label>
+        <input type="text" placeholder="000.000.000-00 ou 00.000.000/0000-00" value="${esc(draft.documento)}" data-action="draft-field" data-field="documento">
+        ${docInvalid ? '<div style="color:var(--red);font-size:11.5px;margin-top:6px;">CPF/CNPJ inválido — confira os números digitados.</div>' : ''}
+      </div>
+      <div class="field"><label>Volume Solicitado (R$)</label><input type="text" inputmode="decimal" value="${esc(draft.impulsaVolume)}" data-action="draft-field" data-field="impulsaVolume"></div>
+    </div>
+    <div class="field"><label>Histórico Comercial</label><textarea placeholder="Descreva o histórico comercial do cliente..." data-action="draft-field" data-field="impulsaHistorico">${esc(draft.impulsaHistorico)}</textarea></div>
+    <div class="form-grid-2">
+      <div class="field"><label>Telefone <span style="font-weight:500;text-transform:none;color:var(--muted);">(opcional)</span></label><input type="text" placeholder="(00) 00000-0000" value="${esc(draft.telefone)}" data-action="draft-field" data-field="telefone"></div>
+      <div class="field"><label>E-mail <span style="font-weight:500;text-transform:none;color:var(--muted);">(opcional)</span></label><input type="text" inputmode="email" placeholder="email@exemplo.com" value="${esc(draft.email)}" data-action="draft-field" data-field="email"></div>
+    </div>
+    ${volume > IMPULSA_VOLUME_LIMIT ? `
+      <div class="section-divider"></div>
+      <div class="section-label">Documentos Financeiros (obrigatório acima de R$ 2 milhões)</div>
+      ${uploadSlot('impulsa_balanco_2025', 'Balanço 2025', draft.docs, '', draft.uploading.impulsa_balanco_2025)}
+      ${uploadSlot('impulsa_dre_2025', 'DRE 2025', draft.docs, '', draft.uploading.impulsa_dre_2025)}
+      ${uploadSlot('impulsa_balancete_2026', 'Balancete 2026 (opcional)', draft.docs, '', draft.uploading.impulsa_balancete_2026)}
+      ${uploadSlot('impulsa_balanco_2024', 'Balanço 2024 (opcional)', draft.docs, '', draft.uploading.impulsa_balanco_2024)}
+      ${uploadSlot('impulsa_dre_2024', 'DRE 2024 (opcional)', draft.docs, '', draft.uploading.impulsa_dre_2024)}
+    ` : ''}
+  `;
+}
+
+function ImpulsaLoteFields(draft, uploadSlot) {
+  const rows = draft.impulsaLoteRows || [];
+  const invalidCount = rows.filter(r => !isImpulsaRowValid(r)).length;
+  return `
+    <div class="section-divider"></div>
+    <div class="section-label">Upload da Planilha</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
+      Colunas esperadas: Nome, CPF/CNPJ, Volume Solicitado, Histórico Comercial (Telefone e E-mail são opcionais). Até ${IMPULSA_LOTE_ROW_LIMIT} linhas por planilha.
+    </div>
+    <div class="form-grid-2" style="align-items:start;">
+      <label class="upload-slot ${draft.impulsaLoteFileName ? 'filled' : ''}" style="margin:0;">
+        ${draft.impulsaLoteFileName ? '✅' : '📤'} <span class="name">${draft.impulsaLoteFileName ? esc(draft.impulsaLoteFileName) : 'Clique para selecionar a planilha (.xlsx)'}</span>
+        <input type="file" accept=".xlsx,.xls" data-action="impulsa-lote-file">
+      </label>
+      <button type="button" class="btn btn-outline" style="margin:0;" data-action="impulsa-lote-template">⬇ Baixar Modelo de Planilha</button>
+    </div>
+    ${rows.length ? `
+      <div class="section-divider"></div>
+      <div class="section-label">Clientes na Planilha (${rows.length}) ${invalidCount ? `<span style="color:var(--red);">— ${invalidCount} com pendência</span>` : '<span style="color:var(--green);">— tudo certo</span>'}</div>
+      ${rows.map((row, i) => ImpulsaLoteRow(row, i, uploadSlot)).join('')}
+    ` : ''}
+  `;
+}
+
+function ImpulsaLoteRow(row, i, uploadSlot) {
+  const volume = Number(row.volume) || 0;
+  const errors = [];
+  if (!row.nome) errors.push('nome');
+  if (!row.documento || !isValidDocumento(row.documento)) errors.push('CPF/CNPJ');
+  if (!row.volume || volume <= 0) errors.push('volume');
+  if (volume > IMPULSA_VOLUME_LIMIT && (!row.docs.impulsa_balanco_2025 || !row.docs.impulsa_dre_2025)) errors.push('Balanço/DRE 2025');
+  const ok = errors.length === 0;
+  return `
+    <div class="subsection" style="border-color:${ok ? 'var(--green)' : 'var(--red)'};">
+      <div class="top-row" style="margin-bottom:10px;">
+        <div class="section-label" style="margin:0;">${i + 1}. ${esc(row.nome || '(sem nome)')} ${ok ? '✅' : '⚠️'}</div>
+        <button type="button" class="link-btn muted" data-action="impulsa-lote-remove-row" data-idx="${i}">✕ Remover</button>
+      </div>
+      ${!ok ? `<div style="color:var(--red);font-size:12px;margin-bottom:10px;">Corrija: ${errors.join(', ')}</div>` : ''}
+      <div class="form-grid-2">
+        <div class="field"><label>Nome</label><input type="text" value="${esc(row.nome)}" data-action="impulsa-lote-row-field" data-idx="${i}" data-field="nome"></div>
+        <div class="field"><label>CPF/CNPJ</label><input type="text" value="${esc(row.documento)}" data-action="impulsa-lote-row-field" data-idx="${i}" data-field="documento"></div>
+      </div>
+      <div class="form-grid-2">
+        <div class="field"><label>Volume (R$)</label><input type="text" inputmode="decimal" value="${esc(row.volume)}" data-action="impulsa-lote-row-field" data-idx="${i}" data-field="volume"></div>
+        <div class="field"><label>Telefone (opcional)</label><input type="text" value="${esc(row.telefone)}" data-action="impulsa-lote-row-field" data-idx="${i}" data-field="telefone"></div>
+      </div>
+      <div class="field"><label>Histórico Comercial</label><textarea data-action="impulsa-lote-row-field" data-idx="${i}" data-field="historico">${esc(row.historico)}</textarea></div>
+      <div class="field"><label>E-mail (opcional)</label><input type="text" inputmode="email" value="${esc(row.email)}" data-action="impulsa-lote-row-field" data-idx="${i}" data-field="email"></div>
+      ${volume > IMPULSA_VOLUME_LIMIT ? `
+        <div class="section-label" style="margin-top:10px;">Documentos Financeiros (volume acima de R$ 2 milhões)</div>
+        ${uploadSlot('impulsa_balanco_2025', 'Balanço 2025', row.docs, `data-group="impulsaLoteRows" data-idx="${i}"`, (row.uploading || {}).impulsa_balanco_2025)}
+        ${uploadSlot('impulsa_dre_2025', 'DRE 2025', row.docs, `data-group="impulsaLoteRows" data-idx="${i}"`, (row.uploading || {}).impulsa_dre_2025)}
+        ${uploadSlot('impulsa_balancete_2026', 'Balancete 2026 (opcional)', row.docs, `data-group="impulsaLoteRows" data-idx="${i}"`, (row.uploading || {}).impulsa_balancete_2026)}
+        ${uploadSlot('impulsa_balanco_2024', 'Balanço 2024 (opcional)', row.docs, `data-group="impulsaLoteRows" data-idx="${i}"`, (row.uploading || {}).impulsa_balanco_2024)}
+        ${uploadSlot('impulsa_dre_2024', 'DRE 2024 (opcional)', row.docs, `data-group="impulsaLoteRows" data-idx="${i}"`, (row.uploading || {}).impulsa_dre_2024)}
+      ` : ''}
+    </div>
+  `;
+}
+
 function NovaSolicitacaoModal(draft) {
   const covered = COVERED_OPERATIONS.includes(draft.operation);
   const isImpulsa = draft.operation === 'IMPULSA';
@@ -1790,36 +1939,24 @@ function NovaSolicitacaoModal(draft) {
         </div>
       </div>
     ` : ''}
-    <div class="field"><label>Nome do Cliente ou Razão Social</label><input type="text" placeholder="Nome completo ou Razão Social" value="${esc(draft.nome)}" data-action="draft-field" data-field="nome"></div>
-    <div class="form-grid-2">
-      <div class="field">
-        <label>CPF ou CNPJ</label>
-        <input type="text" placeholder="000.000.000-00 ou 00.000.000/0000-00" value="${esc(draft.documento)}" data-action="draft-field" data-field="documento">
-        ${docInvalid ? '<div style="color:var(--red);font-size:11.5px;margin-top:6px;">CPF/CNPJ inválido — confira os números digitados.</div>' : ''}
+    ${!isImpulsa ? `
+      <div class="field"><label>Nome do Cliente ou Razão Social</label><input type="text" placeholder="Nome completo ou Razão Social" value="${esc(draft.nome)}" data-action="draft-field" data-field="nome"></div>
+      <div class="form-grid-2">
+        <div class="field">
+          <label>CPF ou CNPJ</label>
+          <input type="text" placeholder="000.000.000-00 ou 00.000.000/0000-00" value="${esc(draft.documento)}" data-action="draft-field" data-field="documento">
+          ${docInvalid ? '<div style="color:var(--red);font-size:11.5px;margin-top:6px;">CPF/CNPJ inválido — confira os números digitados.</div>' : ''}
+        </div>
+        <div class="field"><label>Telefone</label><input type="text" placeholder="(00) 00000-0000" value="${esc(draft.telefone)}" data-action="draft-field" data-field="telefone"></div>
       </div>
-      <div class="field"><label>Telefone</label><input type="text" placeholder="(00) 00000-0000" value="${esc(draft.telefone)}" data-action="draft-field" data-field="telefone"></div>
-    </div>
-    <div class="field"><label>E-mail</label><input type="text" inputmode="email" placeholder="email@exemplo.com" value="${esc(draft.email)}" data-action="draft-field" data-field="email"></div>
+      <div class="field"><label>E-mail</label><input type="text" inputmode="email" placeholder="email@exemplo.com" value="${esc(draft.email)}" data-action="draft-field" data-field="email"></div>
+    ` : ''}
   `;
 
   if (covered) {
     if (profile) body += ChecklistFormFields(draft, profile, uploadSlot);
   } else if (isImpulsa) {
-    body += `
-      <div class="section-divider"></div>
-      <div class="section-label">Representantes Impulsiona</div>
-      <div class="form-grid-2">
-        <div class="field"><label>Nome do CFO</label><input type="text" value="${esc(draft.nomeCFO)}" data-action="draft-field" data-field="nomeCFO"></div>
-        <div class="field"><label>Nome do CO</label><input type="text" value="${esc(draft.nomeCO)}" data-action="draft-field" data-field="nomeCO"></div>
-      </div>
-      <div class="form-grid-2">
-        <div class="field"><label>Telefone dos Representantes</label><input type="text" placeholder="(00) 00000-0000" value="${esc(draft.impulsaTelefone)}" data-action="draft-field" data-field="impulsaTelefone"></div>
-        <div class="field"><label>E-mail dos Representantes</label><input type="text" inputmode="email" placeholder="email@exemplo.com" value="${esc(draft.impulsaEmail)}" data-action="draft-field" data-field="impulsaEmail"></div>
-      </div>
-      <div class="section-divider"></div>
-      <div class="section-label">Anexar Documento Obrigatório</div>
-      ${uploadSlot('curva_abc_cliente', CK_DOCS.curva_abc_cliente.label, draft.docs, '', draft.uploading.curva_abc_cliente)}
-    `;
+    body += ImpulsaFormFields(draft, uploadSlot);
   } else if (type === 'PJ') {
     body += `
       <div class="section-divider"></div>
@@ -2031,7 +2168,7 @@ function emptyDraft() {
     possuiAvalista: '', certidaoPFPJ: '', numeroEmitentes: '',
     temConjugeAvalista: '', conjugeProfissao: '', conjugeContato: '',
     dadosBancarios: '', enderecoFazenda: '', nacionalidade: '',
-    nomeCFO: '', nomeCO: '', impulsaTelefone: '', impulsaEmail: '',
+    impulsaModelo: '', impulsaVolume: '', impulsaHistorico: '', impulsaLoteRows: [], impulsaLoteFileName: '',
     confinaPlanilha: emptyConfinaPlanilha(), visitaRelatorio: emptyVisitaRelatorio(),
     faturamento: emptyFaturamento(), endividamentoPatrimonio: emptyEndividamentoPatrimonio(),
     bensImoveis: '', bensAplicacoes: '', bensParticipacoes: '', bensOutros: '', dividaPF: '',
@@ -2078,7 +2215,8 @@ async function uploadDraftFile(file, key, groupKey, idx) {
     target.uploading[key] = false;
     draft.anyUploading = Object.values(draft.uploading).some(Boolean)
       || draft.emitentes.some(em => Object.values(em.uploading || {}).some(Boolean))
-      || draft.socios.some(s => Object.values(s.uploading || {}).some(Boolean));
+      || draft.socios.some(s => Object.values(s.uploading || {}).some(Boolean))
+      || draft.impulsaLoteRows.some(r => Object.values(r.uploading || {}).some(Boolean));
     renderModal();
   }
 }
@@ -2321,10 +2459,40 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'submit-nova-solicitacao': {
         const draft = ui.modal.draft;
         if (!isFormComplete(draft)) { toast('Preencha todos os campos e documentos obrigatórios.'); break; }
+
+        if (draft.operation === 'IMPULSA' && draft.impulsaModelo === 'lote') {
+          try {
+            const loteId = uid(10);
+            const batch = fbDb.batch();
+            draft.impulsaLoteRows.forEach(row => {
+              const ref = fbDb.collection('requests').doc();
+              batch.set(ref, {
+                partnerId: authUser.uid, operation: 'IMPULSA', status: 'em_analise',
+                form: {
+                  operation: 'IMPULSA', impulsaModelo: 'lote', loteId,
+                  nome: row.nome, documento: row.documento, impulsaVolume: row.volume,
+                  impulsaHistorico: row.historico, telefone: row.telefone, email: row.email,
+                },
+                documents: buildImpulsaLoteRowDocuments(row),
+                feedbackHistory: [],
+                createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+              });
+            });
+            await batch.commit();
+            ui.modal = null;
+            ui.partner.screen = 'dashboard';
+            render();
+            toast(`${draft.impulsaLoteRows.length} solicitações criadas com sucesso!`);
+          } catch (err) {
+            toast('Falha ao criar as solicitações: ' + err.message);
+          }
+          break;
+        }
+
         // Firestore rejects `undefined` field values, so these must be dropped via
         // destructuring rather than set to undefined — the upload/doc-tracking fields
         // don't belong in the form snapshot anyway (they're persisted in `documents`).
-        const { docs, docPaths, uploading, emitentes, extraDocs, anyUploading, id, ...formSnapshot } = draft;
+        const { docs, docPaths, uploading, emitentes, extraDocs, anyUploading, id, impulsaLoteRows, ...formSnapshot } = draft;
         try {
           await fbDb.collection('requests').doc(draft.id).set({
             partnerId: authUser.uid, operation: draft.operation, status: 'em_analise',
@@ -2358,6 +2526,19 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'close-modal':
       case 'close-modal-overlay':
         ui.modal = null;
+        renderModal();
+        break;
+
+      case 'impulsa-lote-template': {
+        const wsData = [['Nome', 'CPF/CNPJ', 'Volume Solicitado', 'Histórico Comercial', 'Telefone', 'E-mail']];
+        const ws = XLSX.utils.aoa_to_sheet(wsData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Modelo');
+        XLSX.writeFile(wb, 'modelo_impulsiona.xlsx');
+        break;
+      }
+      case 'impulsa-lote-remove-row':
+        ui.modal.draft.impulsaLoteRows.splice(parseInt(el.dataset.idx, 10), 1);
         renderModal();
         break;
     }
@@ -2403,6 +2584,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (el.dataset.action === 'endiv-row-field') {
       const idx = parseInt(el.dataset.idx, 10);
       ui.modal.draft.endividamentoPatrimonio[el.dataset.table][idx][el.dataset.field] = el.value;
+      focusPreservingRender(renderModal);
+    }
+    if (el.dataset.action === 'impulsa-lote-row-field') {
+      const idx = parseInt(el.dataset.idx, 10);
+      ui.modal.draft.impulsaLoteRows[idx][el.dataset.field] = el.value;
       focusPreservingRender(renderModal);
     }
   });
@@ -2474,6 +2660,42 @@ document.addEventListener('DOMContentLoaded', () => {
         await fbDb.collection('requests').doc(req.id).update({ documents: docs, updatedAt: FieldValue.serverTimestamp() });
         toast('Documento enviado.');
       } catch (err) { toast('Falha no upload: ' + err.message); }
+    }
+    if (el.dataset.action === 'impulsa-lote-row-field') {
+      const idx = parseInt(el.dataset.idx, 10);
+      ui.modal.draft.impulsaLoteRows[idx][el.dataset.field] = el.value;
+      renderModal();
+    }
+    if (el.dataset.action === 'impulsa-lote-file') {
+      const file = el.files[0];
+      if (!file) return;
+      const draft = ui.modal.draft;
+      try {
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rowsRaw = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        if (!rowsRaw.length) { toast('A planilha está vazia.'); return; }
+        if (rowsRaw.length > IMPULSA_LOTE_ROW_LIMIT) { toast(`A planilha tem mais de ${IMPULSA_LOTE_ROW_LIMIT} linhas — divida em arquivos menores.`); return; }
+        const findCol = (row, patterns) => {
+          const key = Object.keys(row).find(k => patterns.some(p => k.toLowerCase().includes(p)));
+          return key ? String(row[key]).trim() : '';
+        };
+        draft.impulsaLoteRows = rowsRaw.map(r => ({
+          nome: findCol(r, ['nome']),
+          documento: findCol(r, ['cpf', 'cnpj']),
+          volume: findCol(r, ['volume']).replace(/[^\d,.-]/g, '').replace(/\.(?=\d{3}(?:\D|$))/g, '').replace(',', '.'),
+          historico: findCol(r, ['histórico', 'historico']),
+          telefone: findCol(r, ['telefone', 'fone']),
+          email: findCol(r, ['e-mail', 'email']),
+          docs: {}, docPaths: {}, uploading: {},
+        }));
+        draft.impulsaLoteFileName = file.name;
+        toast(`${draft.impulsaLoteRows.length} linha(s) carregada(s) — confira os dados antes de enviar.`);
+      } catch (err) {
+        toast('Não foi possível ler a planilha: ' + err.message);
+      }
+      renderModal();
     }
   });
 });
