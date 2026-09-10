@@ -2473,6 +2473,11 @@ function friendlyAuthError(err) {
 function focusPreservingRender(renderFn) {
   const active = document.activeElement;
   let sel = null;
+  // the modal is rebuilt wholesale on every keystroke, which tears down and
+  // recreates its own scrollable overlay — resetting scrollTop to 0 — so we
+  // have to save/restore that scroll position ourselves, same as focus.
+  const scrollEl = active ? active.closest('.modal-overlay') : null;
+  const scrollTop = scrollEl ? scrollEl.scrollTop : null;
   if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
     sel = {
       action: active.dataset.action || null,
@@ -2487,21 +2492,26 @@ function focusPreservingRender(renderFn) {
     };
   }
   renderFn();
-  if (!sel) return;
-  let selector = sel.id ? `#${CSS.escape(sel.id)}` : `[data-action="${sel.action}"]`;
-  if (!sel.id) {
-    if (sel.field) selector += `[data-field="${sel.field}"]`;
-    if (sel.idx !== null) selector += `[data-idx="${sel.idx}"]`;
-    if (sel.metric) selector += `[data-metric="${sel.metric}"]`;
-    if (sel.ano) selector += `[data-ano="${sel.ano}"]`;
-    if (sel.table) selector += `[data-table="${sel.table}"]`;
-  }
-  const found = document.querySelector(selector);
-  if (found) {
-    found.focus();
-    if (typeof sel.start === 'number' && found.setSelectionRange) {
-      try { found.setSelectionRange(sel.start, sel.end); } catch (e) { /* not applicable to this input type */ }
+  if (sel) {
+    let selector = sel.id ? `#${CSS.escape(sel.id)}` : `[data-action="${sel.action}"]`;
+    if (!sel.id) {
+      if (sel.field) selector += `[data-field="${sel.field}"]`;
+      if (sel.idx !== null) selector += `[data-idx="${sel.idx}"]`;
+      if (sel.metric) selector += `[data-metric="${sel.metric}"]`;
+      if (sel.ano) selector += `[data-ano="${sel.ano}"]`;
+      if (sel.table) selector += `[data-table="${sel.table}"]`;
     }
+    const found = document.querySelector(selector);
+    if (found) {
+      found.focus({ preventScroll: true });
+      if (typeof sel.start === 'number' && found.setSelectionRange) {
+        try { found.setSelectionRange(sel.start, sel.end); } catch (e) { /* not applicable to this input type */ }
+      }
+    }
+  }
+  if (scrollTop !== null) {
+    const newScrollEl = document.querySelector('.modal-overlay');
+    if (newScrollEl) newScrollEl.scrollTop = scrollTop;
   }
 }
 
