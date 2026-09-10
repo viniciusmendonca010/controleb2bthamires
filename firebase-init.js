@@ -13,3 +13,13 @@ firebase.initializeApp(firebaseConfig);
 const fbAuth = firebase.auth();
 const fbDb = firebase.firestore();
 const fbStorage = firebase.storage();
+
+/* EmailJS — notifies the partner's registered e-mail when a request's status
+   changes. Fill these in from your EmailJS dashboard (Account > General for
+   the public key; Email Services / Email Templates for the other two) —
+   until then EMAILJS_PUBLIC_KEY stays empty and sends are skipped, so the
+   rest of the app keeps working normally without it. */
+const EMAILJS_SERVICE_ID = '';
+const EMAILJS_TEMPLATE_ID = '';
+const EMAILJS_PUBLIC_KEY = '';
+if (EMAILJS_PUBLIC_KEY && window.emailjs) emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });

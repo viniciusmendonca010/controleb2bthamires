@@ -523,6 +523,28 @@ function toast(msg) {
   setTimeout(() => el.remove(), 3200);
 }
 
+// e-mails the partner's registered address whenever the gestor moves their
+// request to a new status; silently does nothing until EmailJS is configured
+// in firebase-init.js, so the rest of the admin flow never depends on it.
+async function notifyPartnerStatusChange(r, newStatus, feedback) {
+  if (!EMAILJS_PUBLIC_KEY || !window.emailjs) return;
+  const partner = db.partners.find(p => p.id === r.partnerId);
+  const toEmail = partner?.email;
+  if (!toEmail) return;
+  try {
+    await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+      to_email: toEmail,
+      to_name: partner.name || r.form?.nome || 'Parceiro',
+      operation_label: OPERATIONS[r.operation]?.label || r.operation,
+      status_label: STATUS_META[newStatus]?.label || newStatus,
+      feedback_text: feedback || '',
+      request_id: r.id,
+    });
+  } catch (e) {
+    toast('Status salvo, mas o e-mail de notificação falhou: ' + (e.text || e.message || 'erro desconhecido'));
+  }
+}
+
 /* ============================================================
    DOCUMENT REQUIREMENT ENGINE (Nova Solicitação)
    ============================================================ */
@@ -2233,6 +2255,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (newStatus) payload.status = newStatus;
         await fbDb.collection('requests').doc(r.id).update(payload);
         toast('Atualizações salvas.');
+        if (newStatus && newStatus !== r.status) await notifyPartnerStatusChange(r, newStatus, feedback);
         render();
         break;
       }
