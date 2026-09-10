@@ -986,6 +986,15 @@ function AdminPartnerProfile(partnerId, returnTab) {
   const p = db.partners.find(x => x.id === partnerId);
   if (!p) return `<p>Parceiro não encontrado.</p>`;
   const reqs = db.requests.filter(r => r.partnerId === partnerId);
+  // "Início do Relacionamento" / "Última Atualização" reflect real activity — the
+  // first and most recent solicitação — rather than the partner record's own
+  // relationshipStart/lastUpdate, which only change when the cadastro itself is
+  // edited and otherwise sit frozen at signup time even as requests come and go.
+  const reqTimestamps = (field) => reqs.map(r => r[field]?.toMillis?.()).filter(ms => typeof ms === 'number');
+  const createdTimestamps = reqTimestamps('createdAt');
+  const updatedTimestamps = reqTimestamps('updatedAt');
+  const relationshipStart = createdTimestamps.length ? new Date(Math.min(...createdTimestamps)) : p.relationshipStart;
+  const lastUpdate = updatedTimestamps.length ? new Date(Math.max(...updatedTimestamps)) : p.lastUpdate;
   return `
     <button class="back-link" data-action="admin-back-to-tab" data-tab="${returnTab}">← Voltar ao Dashboard</button>
     <div class="detail-head" style="margin-top:14px;">
@@ -1000,8 +1009,8 @@ function AdminPartnerProfile(partnerId, returnTab) {
           <div class="mono" style="color:var(--muted);">👤 ${esc(p.document)}</div>
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;">
-          <div class="subsection" style="padding:12px 16px;"><div class="eyebrow">Início do Relacionamento</div><div>📅 ${fmtDate(p.relationshipStart)}</div></div>
-          <div class="subsection" style="padding:12px 16px;"><div class="eyebrow">Última Atualização</div><div>🕒 ${fmtDate(p.lastUpdate)}</div></div>
+          <div class="subsection" style="padding:12px 16px;"><div class="eyebrow">Início do Relacionamento</div><div>📅 ${fmtDate(relationshipStart)}</div></div>
+          <div class="subsection" style="padding:12px 16px;"><div class="eyebrow">Última Atualização</div><div>🕒 ${fmtDate(lastUpdate)}</div></div>
         </div>
       </div>
       <div class="form-grid-2" style="margin-top:18px;">
