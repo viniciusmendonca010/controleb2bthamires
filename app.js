@@ -157,11 +157,8 @@ const CK_DOCS = {
   planilha_confina: { key: 'planilha_confina', label: 'Planilha Produtor Agrícola/Confina (modelo Ceres)' },
   curva_abc_cliente: { key: 'curva_abc_cliente', label: 'Curva ABC Cliente' },
   curva_abc_fornecedor: { key: 'curva_abc_fornecedor', label: 'Curva ABC Fornecedor' },
-  impulsa_balanco_2025: { key: 'impulsa_balanco_2025', label: 'Balanço 2025' },
-  impulsa_dre_2025: { key: 'impulsa_dre_2025', label: 'DRE 2025' },
-  impulsa_balancete_2026: { key: 'impulsa_balancete_2026', label: 'Balancete 2026', optional: true },
-  impulsa_balanco_2024: { key: 'impulsa_balanco_2024', label: 'Balanço 2024', optional: true },
-  impulsa_dre_2024: { key: 'impulsa_dre_2024', label: 'DRE 2024', optional: true },
+  impulsa_balanco: { key: 'impulsa_balanco', label: 'Balanço' },
+  impulsa_dre: { key: 'impulsa_dre', label: 'DRE' },
   apresentacao_institucional: { key: 'apresentacao_institucional', label: 'Apresentação Institucional ou Descrição da Companhia' },
   abertura_receita: { key: 'abertura_receita', label: 'Abertura de receita (preço, quantidade e margem de contribuição por linha)' },
   projecao_operacao: { key: 'projecao_operacao', label: 'Projeção — período da operação proposta' },
@@ -597,7 +594,7 @@ function isFormComplete(draft) {
   if (draft.operation === 'IMPULSA') {
     if (draft.impulsaModelo === 'individual') {
       if (!draft.nome || !draft.documento || !isValidDocumento(draft.documento) || !draft.impulsaVolume || Number(draft.impulsaVolume) <= 0) return false;
-      if (Number(draft.impulsaVolume) > IMPULSA_VOLUME_LIMIT && (!draft.docs.impulsa_balanco_2025 || !draft.docs.impulsa_dre_2025)) return false;
+      if (Number(draft.impulsaVolume) > IMPULSA_VOLUME_LIMIT && (!draft.docs.impulsa_balanco || !draft.docs.impulsa_dre)) return false;
       return true;
     }
     if (draft.impulsaModelo === 'lote') {
@@ -644,7 +641,7 @@ function buildDocumentsFromDraft(draft) {
   if (draft.operation === 'IMPULSA') {
     const out = [];
     if (Number(draft.impulsaVolume) > IMPULSA_VOLUME_LIMIT) {
-      ['impulsa_balanco_2025', 'impulsa_dre_2025', 'impulsa_balancete_2026', 'impulsa_balanco_2024', 'impulsa_dre_2024'].forEach(k => {
+      ['impulsa_balanco', 'impulsa_dre'].forEach(k => {
         const d = CK_DOCS[k];
         out.push({ ...d, status: draft.docs[k] ? 'enviado' : 'pendente', fileName: draft.docs[k] || null, storagePath: draft.docPaths[k] || null });
       });
@@ -1875,11 +1872,8 @@ function ImpulsaIndividualFields(draft, uploadSlot) {
     ${acima ? `
       <div class="section-divider"></div>
       <div class="section-label">Documentos Financeiros (obrigatório acima de R$ 2 milhões)</div>
-      ${uploadSlot('impulsa_balanco_2025', 'Balanço 2025', draft.docs, '', draft.uploading.impulsa_balanco_2025)}
-      ${uploadSlot('impulsa_dre_2025', 'DRE 2025', draft.docs, '', draft.uploading.impulsa_dre_2025)}
-      ${uploadSlot('impulsa_balancete_2026', 'Balancete 2026 (opcional)', draft.docs, '', draft.uploading.impulsa_balancete_2026)}
-      ${uploadSlot('impulsa_balanco_2024', 'Balanço 2024 (opcional)', draft.docs, '', draft.uploading.impulsa_balanco_2024)}
-      ${uploadSlot('impulsa_dre_2024', 'DRE 2024 (opcional)', draft.docs, '', draft.uploading.impulsa_dre_2024)}
+      ${uploadSlot('impulsa_balanco', 'Balanço', draft.docs, '', draft.uploading.impulsa_balanco)}
+      ${uploadSlot('impulsa_dre', 'DRE', draft.docs, '', draft.uploading.impulsa_dre)}
     ` : ''}
   `;
 }
@@ -2492,7 +2486,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             const docs = r.documents || [];
             const sent = (k) => docs.some(d => d.key === k && d.status === 'enviado');
-            if (!sent('impulsa_balanco_2025') || !sent('impulsa_dre_2025')) {
+            if (!sent('impulsa_balanco') || !sent('impulsa_dre')) {
               toast('Para volume acima de ' + fmtBRL(IMPULSA_VOLUME_LIMIT) + ' é necessário anexar Balanço e DRE — exclua esta solicitação e crie uma nova para poder anexá-los.');
               break;
             }
