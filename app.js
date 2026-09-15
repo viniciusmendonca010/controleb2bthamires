@@ -70,20 +70,11 @@ const OPERATIONS = {
 };
 // Ceres AgroFinance is the only operation with a required sub-type today.
 const AGROFINANCE_SUBTIPOS = ['Antecipação de Recebíveis', 'Semi-Estruturada', 'Estruturada'];
-// Impulsiona: the stored volume is always capped at this amount when the
-// request is submitted — requests actually needing more must go through the
-// full manual flow (another Tipo de Operação) instead, so Impulsiona itself
-// never collects Balanço/DRE or any other document tied to volume.
+// Impulsiona: above this requested volume, Balanço/DRE 2025 become required —
+// and only the Individual model accepts it. Em Lote is capped at this volume
+// per row; a row that needs more must be submitted individually instead.
 const IMPULSA_VOLUME_LIMIT = 2000000;
 const IMPULSA_LOTE_ROW_LIMIT = 200;
-// caps the stored volume at IMPULSA_VOLUME_LIMIT; keeps the originally
-// requested figure alongside it (when different) so the gestor can see a
-// partner actually needed more and route them to the manual/full flow.
-function capImpulsaVolume(rawVolume) {
-  const original = Number(rawVolume) || 0;
-  const capped = Math.min(original, IMPULSA_VOLUME_LIMIT);
-  return { impulsaVolume: String(capped), impulsaVolumeOriginal: original > IMPULSA_VOLUME_LIMIT ? String(original) : null };
-}
 // Lets a partner correct their own request in place (fix a typo, replace a
 // rejected file, adjust a value) instead of forcing a whole new solicitação.
 // Keyed by request id so switching between requests re-seeds the draft from
@@ -99,6 +90,7 @@ function isImpulsaRowValid(row) {
   if (!row.nome || !row.documento || !isValidDocumento(row.documento)) return false;
   const volume = Number(row.volume) || 0;
   if (!row.volume || volume <= 0) return false;
+  if (volume > IMPULSA_VOLUME_LIMIT) return false;
   return true;
 }
 const STATUS_META = {
@@ -165,6 +157,11 @@ const CK_DOCS = {
   planilha_confina: { key: 'planilha_confina', label: 'Planilha Produtor Agrícola/Confina (modelo Ceres)' },
   curva_abc_cliente: { key: 'curva_abc_cliente', label: 'Curva ABC Cliente' },
   curva_abc_fornecedor: { key: 'curva_abc_fornecedor', label: 'Curva ABC Fornecedor' },
+  impulsa_balanco_2025: { key: 'impulsa_balanco_2025', label: 'Balanço 2025' },
+  impulsa_dre_2025: { key: 'impulsa_dre_2025', label: 'DRE 2025' },
+  impulsa_balancete_2026: { key: 'impulsa_balancete_2026', label: 'Balancete 2026', optional: true },
+  impulsa_balanco_2024: { key: 'impulsa_balanco_2024', label: 'Balanço 2024', optional: true },
+  impulsa_dre_2024: { key: 'impulsa_dre_2024', label: 'DRE 2024', optional: true },
   apresentacao_institucional: { key: 'apresentacao_institucional', label: 'Apresentação Institucional ou Descrição da Companhia' },
   abertura_receita: { key: 'abertura_receita', label: 'Abertura de receita (preço, quantidade e margem de contribuição por linha)' },
   projecao_operacao: { key: 'projecao_operacao', label: 'Projeção — período da operação proposta' },
@@ -599,7 +596,9 @@ function isFormComplete(draft) {
 
   if (draft.operation === 'IMPULSA') {
     if (draft.impulsaModelo === 'individual') {
-      return !!(draft.nome && draft.documento && isValidDocumento(draft.documento) && draft.impulsaVolume && Number(draft.impulsaVolume) > 0);
+      if (!draft.nome || !draft.documento || !isValidDocumento(draft.documento) || !draft.impulsaVolume || Number(draft.impulsaVolume) <= 0) return false;
+      if (Number(draft.impulsaVolume) > IMPULSA_VOLUME_LIMIT && (!draft.docs.impulsa_balanco_2025 || !draft.docs.impulsa_dre_2025)) return false;
+      return true;
     }
     if (draft.impulsaModelo === 'lote') {
       return draft.impulsaLoteRows.length > 0 && draft.impulsaLoteRows.every(isImpulsaRowValid);
@@ -644,6 +643,12 @@ function buildDocumentsFromDraft(draft) {
 
   if (draft.operation === 'IMPULSA') {
     const out = [];
+    if (Number(draft.impulsaVolume) > IMPULSA_VOLUME_LIMIT) {
+      ['impulsa_balanco_2025', 'impulsa_dre_2025', 'impulsa_balancete_2026', 'impulsa_balanco_2024', 'impulsa_dre_2024'].forEach(k => {
+        const d = CK_DOCS[k];
+        out.push({ ...d, status: draft.docs[k] ? 'enviado' : 'pendente', fileName: draft.docs[k] || null, storagePath: draft.docPaths[k] || null });
+      });
+    }
     (draft.extraDocs || []).forEach((f, i) => out.push({ key: 'extra_' + i, label: `Documento adicional: ${f.name}`, status: 'enviado', fileName: f.name, storagePath: f.path }));
     return out;
   }
@@ -1153,10 +1158,10 @@ function RequestDetail(requestId, mode, returnTo) {
       ${f.operation === 'IMPULSA' ? `
         <div class="form-grid-2">
           <div class="field"><label>Modelo</label><input type="text" value="${f.impulsaModelo === 'lote' ? 'Em Lote' : 'Individual'}" disabled></div>
-          ${efield(`Volume (limitado a ${fmtBRL(IMPULSA_VOLUME_LIMIT)})`, 'impulsaVolume', { inputmode: 'decimal' })}
+          ${efield('Volume Solicitado (R$)', 'impulsaVolume', { inputmode: 'decimal' })}
         </div>
-        ${f.impulsaVolumeOriginal ? `
-          <div class="feedback-banner"><b>Atenção</b>O parceiro solicitou originalmente ${fmtBRL(f.impulsaVolumeOriginal)} — valor acima do teto do Impulsiona. Oriente-o a abrir uma solicitação manual com a documentação completa para o volume real.</div>
+        ${Number(f.impulsaVolume) > IMPULSA_VOLUME_LIMIT ? `
+          <div class="feedback-banner"><b>Atenção</b>Volume acima de ${fmtBRL(IMPULSA_VOLUME_LIMIT)} — exige Balanço e DRE anexados (veja Documentos abaixo).</div>
         ` : ''}
         ${etextarea('Histórico Comercial', 'impulsaHistorico')}
       ` : (f.tipoPessoa || personType(f.documento)) === 'PJ' ? `
@@ -1851,7 +1856,6 @@ function ImpulsaIndividualFields(draft, uploadSlot) {
       <div class="field">
         <label>Volume Solicitado (R$)</label>
         <input type="text" inputmode="decimal" value="${esc(draft.impulsaVolume)}" data-action="draft-field" data-field="impulsaVolume">
-        ${volume > IMPULSA_VOLUME_LIMIT ? `<div style="color:var(--orange);font-size:11.5px;margin-top:6px;">Valores acima de ${fmtBRL(IMPULSA_VOLUME_LIMIT)} são limitados automaticamente a esse teto no envio. Para volumes maiores, use o fluxo manual com documentação completa.</div>` : ''}
       </div>
     </div>
     <div class="field"><label>Histórico Comercial</label><textarea placeholder="Descreva o histórico comercial do cliente..." data-action="draft-field" data-field="impulsaHistorico">${esc(draft.impulsaHistorico)}</textarea></div>
@@ -1859,6 +1863,15 @@ function ImpulsaIndividualFields(draft, uploadSlot) {
       <div class="field"><label>Telefone <span style="font-weight:500;text-transform:none;color:var(--muted);">(opcional)</span></label><input type="text" placeholder="(00) 00000-0000" value="${esc(draft.telefone)}" data-action="draft-field" data-field="telefone"></div>
       <div class="field"><label>E-mail <span style="font-weight:500;text-transform:none;color:var(--muted);">(opcional)</span></label><input type="text" inputmode="email" placeholder="email@exemplo.com" value="${esc(draft.email)}" data-action="draft-field" data-field="email"></div>
     </div>
+    ${volume > IMPULSA_VOLUME_LIMIT ? `
+      <div class="section-divider"></div>
+      <div class="section-label">Documentos Financeiros (obrigatório acima de R$ 2 milhões)</div>
+      ${uploadSlot('impulsa_balanco_2025', 'Balanço 2025', draft.docs, '', draft.uploading.impulsa_balanco_2025)}
+      ${uploadSlot('impulsa_dre_2025', 'DRE 2025', draft.docs, '', draft.uploading.impulsa_dre_2025)}
+      ${uploadSlot('impulsa_balancete_2026', 'Balancete 2026 (opcional)', draft.docs, '', draft.uploading.impulsa_balancete_2026)}
+      ${uploadSlot('impulsa_balanco_2024', 'Balanço 2024 (opcional)', draft.docs, '', draft.uploading.impulsa_balanco_2024)}
+      ${uploadSlot('impulsa_dre_2024', 'DRE 2024 (opcional)', draft.docs, '', draft.uploading.impulsa_dre_2024)}
+    ` : ''}
   `;
 }
 
@@ -1892,6 +1905,7 @@ function ImpulsaLoteRow(row, i) {
   if (!row.nome) errors.push('nome');
   if (!row.documento || !isValidDocumento(row.documento)) errors.push('CPF/CNPJ');
   if (!row.volume || volume <= 0) errors.push('volume');
+  else if (volume > IMPULSA_VOLUME_LIMIT) errors.push('volume acima do limite do lote');
   const ok = errors.length === 0;
   return `
     <div class="subsection" style="border-color:${ok ? 'var(--green)' : 'var(--red)'};">
@@ -1908,7 +1922,7 @@ function ImpulsaLoteRow(row, i) {
         <div class="field">
           <label>Volume (R$)</label>
           <input type="text" inputmode="decimal" value="${esc(row.volume)}" data-action="impulsa-lote-row-field" data-idx="${i}" data-field="volume">
-          ${volume > IMPULSA_VOLUME_LIMIT ? `<div style="color:var(--orange);font-size:11px;margin-top:4px;">Limitado a ${fmtBRL(IMPULSA_VOLUME_LIMIT)} no envio.</div>` : ''}
+          ${volume > IMPULSA_VOLUME_LIMIT ? `<div style="color:var(--red);font-size:11px;margin-top:4px;">Acima de ${fmtBRL(IMPULSA_VOLUME_LIMIT)} não pode ser enviado em lote — remova esta linha e crie uma solicitação Individual com Balanço e DRE.</div>` : ''}
         </div>
         <div class="field"><label>Telefone (opcional)</label><input type="text" value="${esc(row.telefone)}" data-action="impulsa-lote-row-field" data-idx="${i}" data-field="telefone"></div>
       </div>
@@ -2460,8 +2474,22 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!r || !draft) break;
         if (!draft.nome || !draft.nome.trim()) { toast('Informe o nome / razão social.'); break; }
         if (!draft.documento || !isValidDocumento(draft.documento)) { toast('CPF/CNPJ inválido.'); break; }
+        if (r.operation === 'IMPULSA') {
+          const vol = Number(draft.impulsaVolume) || 0;
+          if (vol > IMPULSA_VOLUME_LIMIT) {
+            if (r.form.impulsaModelo === 'lote') {
+              toast('Solicitações em lote não podem ultrapassar ' + fmtBRL(IMPULSA_VOLUME_LIMIT) + ' — para um volume maior, exclua esta solicitação e crie uma Individual com Balanço e DRE.');
+              break;
+            }
+            const docs = r.documents || [];
+            const sent = (k) => docs.some(d => d.key === k && d.status === 'enviado');
+            if (!sent('impulsa_balanco_2025') || !sent('impulsa_dre_2025')) {
+              toast('Para volume acima de ' + fmtBRL(IMPULSA_VOLUME_LIMIT) + ' é necessário anexar Balanço e DRE — exclua esta solicitação e crie uma nova para poder anexá-los.');
+              break;
+            }
+          }
+        }
         const updatedForm = { ...r.form, ...draft };
-        if (r.operation === 'IMPULSA') Object.assign(updatedForm, capImpulsaVolume(updatedForm.impulsaVolume));
         try {
           await fbDb.collection('requests').doc(r.id).update({ form: updatedForm, updatedAt: FieldValue.serverTimestamp() });
           toast('Alterações salvas.');
@@ -2514,7 +2542,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 partnerId: authUser.uid, operation: 'IMPULSA', status: 'em_analise',
                 form: {
                   operation: 'IMPULSA', impulsaModelo: 'lote', loteId,
-                  nome: row.nome, documento: row.documento, ...capImpulsaVolume(row.volume),
+                  nome: row.nome, documento: row.documento, impulsaVolume: row.volume,
                   impulsaHistorico: row.historico, telefone: row.telefone, email: row.email,
                 },
                 documents: [],
@@ -2537,7 +2565,6 @@ document.addEventListener('DOMContentLoaded', () => {
         // destructuring rather than set to undefined — the upload/doc-tracking fields
         // don't belong in the form snapshot anyway (they're persisted in `documents`).
         const { docs, docPaths, uploading, emitentes, extraDocs, anyUploading, id, impulsaLoteRows, ...formSnapshot } = draft;
-        if (formSnapshot.operation === 'IMPULSA') Object.assign(formSnapshot, capImpulsaVolume(formSnapshot.impulsaVolume));
         try {
           await fbDb.collection('requests').doc(draft.id).set({
             partnerId: authUser.uid, operation: draft.operation, status: 'em_analise',
