@@ -20,6 +20,48 @@ function fmtDate(v) {
   return d.toLocaleDateString('pt-BR');
 }
 function initials(name) { return (name || '?').trim().charAt(0).toUpperCase(); }
+/* ---------------- live input masks (CPF/CNPJ, thousands-grouped numbers) ----------------
+   The stored value is always plain digits; masking only affects what's shown
+   in the input. Cursor position is tracked by digit count rather than raw
+   character index, since inserted separators shift as more digits are typed. */
+function formatDocumentoDisplay(raw) {
+  const d = (raw || '').replace(/\D/g, '').slice(0, 14);
+  if (d.length <= 11) {
+    return d.replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+  }
+  return d.replace(/(\d{2})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1/$2').replace(/(\d{4})(\d{1,2})$/, '$1-$2');
+}
+function formatThousands(raw) {
+  return (raw || '').replace(/\D/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+}
+function digitsBeforeIndex(str, idx) {
+  let count = 0;
+  for (let i = 0; i < idx && i < str.length; i++) if (/\d/.test(str[i])) count++;
+  return count;
+}
+function cursorAfterDigitCount(str, digitCount) {
+  if (digitCount <= 0) return 0;
+  let count = 0;
+  for (let i = 0; i < str.length; i++) {
+    if (/\d/.test(str[i])) {
+      count++;
+      if (count === digitCount) return i + 1;
+    }
+  }
+  return str.length;
+}
+// Reformats a masked input's displayed value and cursor in place, then
+// returns the raw digits to store. Must run before focusPreservingRender
+// captures the selection, since that's what it will restore after re-render.
+function applyDigitMask(el, formatFn) {
+  const digitsBefore = digitsBeforeIndex(el.value, el.selectionStart);
+  const raw = el.value.replace(/\D/g, '');
+  const formatted = formatFn(raw);
+  el.value = formatted;
+  const pos = cursorAfterDigitCount(formatted, digitsBefore);
+  el.setSelectionRange(pos, pos);
+  return raw;
+}
 function personType(documento) {
   const digits = (documento || '').replace(/\D/g, '');
   if (digits.length === 11) return 'PF';
@@ -1096,10 +1138,11 @@ function RequestDetail(requestId, mode, returnTo) {
   const ed = editable ? ensurePartnerEditDraft(r) : f;
   const efield = (label, field, opts = {}) => {
     const raw = ed[field];
+    const display = (v) => opts.mask ? opts.mask(v) : v;
     if (editable) {
-      return `<div class="field"><label>${label}</label><input type="text" ${opts.inputmode ? `inputmode="${opts.inputmode}"` : ''} value="${esc(raw ?? '')}" data-action="partner-edit-field" data-field="${field}"></div>`;
+      return `<div class="field"><label>${label}</label><input type="text" ${opts.inputmode ? `inputmode="${opts.inputmode}"` : ''} value="${esc(display(raw) ?? '')}" data-action="partner-edit-field" data-field="${field}"></div>`;
     }
-    return `<div class="field"><label>${label}</label><input type="text" value="${esc(raw || (opts.fallback ?? 'N/A'))}" disabled></div>`;
+    return `<div class="field"><label>${label}</label><input type="text" value="${esc(raw ? display(raw) : (opts.fallback ?? 'N/A'))}" disabled></div>`;
   };
   const etextarea = (label, field) => {
     const raw = ed[field];
@@ -1145,7 +1188,7 @@ function RequestDetail(requestId, mode, returnTo) {
     <div class="info-block">
       <div class="form-grid-2">
         ${efield('Nome / Razão Social', 'nome', { fallback: '' })}
-        ${efield('CPF ou CNPJ', 'documento', { fallback: '' })}
+        ${efield('CPF ou CNPJ', 'documento', { fallback: '', mask: formatDocumentoDisplay })}
       </div>
       <div class="form-grid-2">
         ${efield('Telefone', 'telefone', { fallback: '' })}
@@ -1155,7 +1198,7 @@ function RequestDetail(requestId, mode, returnTo) {
       ${f.operation === 'IMPULSA' ? `
         <div class="form-grid-2">
           <div class="field"><label>Modelo</label><input type="text" value="${f.impulsaModelo === 'lote' ? 'Em Lote' : 'Individual'}" disabled></div>
-          ${efield('Volume Solicitado (R$)', 'impulsaVolume', { inputmode: 'decimal' })}
+          ${efield('Volume Solicitado (R$)', 'impulsaVolume', { inputmode: 'decimal', mask: formatThousands })}
         </div>
         ${Number(f.impulsaVolume) > IMPULSA_VOLUME_LIMIT ? `
           <div class="feedback-banner"><b>Atenção</b>Volume acima de ${fmtBRL(IMPULSA_VOLUME_LIMIT)} — exige Balanço e DRE anexados (veja Documentos abaixo).</div>
@@ -1731,7 +1774,7 @@ function ChecklistFormFields(draft, profile, uploadSlot) {
           <div class="section-label">Sócio ${i + 1}</div>
           <div class="field"><label>Nome</label><input type="text" value="${esc(s.nome)}" data-action="draft-socio-field" data-idx="${i}" data-field="nome"></div>
           <div class="form-grid-2">
-            <div class="field"><label>CPF</label><input type="text" value="${esc(s.cpf)}" data-action="draft-socio-field" data-idx="${i}" data-field="cpf"></div>
+            <div class="field"><label>CPF</label><input type="text" value="${esc(formatDocumentoDisplay(s.cpf))}" data-action="draft-socio-field" data-idx="${i}" data-field="cpf"></div>
             <div class="field"><label>Profissão</label><input type="text" value="${esc(s.profissao)}" data-action="draft-socio-field" data-idx="${i}" data-field="profissao"></div>
           </div>
           <div class="form-grid-2">
@@ -1807,7 +1850,7 @@ function ChecklistFormFields(draft, profile, uploadSlot) {
             <div class="section-label">Emitente ${i + 1} (e seu cônjuge)</div>
             <div class="form-grid-2">
               <div class="field"><label>Nome do Emitente</label><input type="text" value="${esc(em.nome)}" data-action="draft-emitente-field" data-idx="${i}" data-field="nome"></div>
-              <div class="field"><label>CPF do Emitente</label><input type="text" value="${esc(em.cpf)}" data-action="draft-emitente-field" data-idx="${i}" data-field="cpf"></div>
+              <div class="field"><label>CPF do Emitente</label><input type="text" value="${esc(formatDocumentoDisplay(em.cpf))}" data-action="draft-emitente-field" data-idx="${i}" data-field="cpf"></div>
             </div>
             <div class="section-label">Documentos pessoais do Emitente ${i + 1}</div>
             ${uploadSlot('doc_pessoal', 'Documentos pessoais (CNH, RG ou CRNM)', em.docs, `data-group="emitentes" data-idx="${i}"`, (em.uploading || {}).doc_pessoal)}
@@ -1856,12 +1899,12 @@ function ImpulsaIndividualFields(draft, uploadSlot) {
     <div class="form-grid-2">
       <div class="field">
         <label>CPF ou CNPJ</label>
-        <input type="text" placeholder="000.000.000-00 ou 00.000.000/0000-00" value="${esc(draft.documento)}" data-action="draft-field" data-field="documento">
+        <input type="text" placeholder="000.000.000-00 ou 00.000.000/0000-00" value="${esc(formatDocumentoDisplay(draft.documento))}" data-action="draft-field" data-field="documento">
         ${docInvalid ? '<div style="color:var(--red);font-size:11.5px;margin-top:6px;">CPF/CNPJ inválido — confira os números digitados.</div>' : ''}
       </div>
       <div class="field">
         <label>Volume Solicitado (R$)</label>
-        <input type="text" inputmode="decimal" value="${esc(draft.impulsaVolume)}" data-action="draft-field" data-field="impulsaVolume">
+        <input type="text" inputmode="decimal" value="${esc(formatThousands(draft.impulsaVolume))}" data-action="draft-field" data-field="impulsaVolume">
       </div>
     </div>
     <div class="field"><label>Histórico Comercial</label><textarea placeholder="Descreva o histórico comercial do cliente..." data-action="draft-field" data-field="impulsaHistorico">${esc(draft.impulsaHistorico)}</textarea></div>
@@ -1919,12 +1962,12 @@ function ImpulsaLoteRow(row, i) {
       ${!ok ? `<div style="color:var(--red);font-size:12px;margin-bottom:10px;">Corrija: ${errors.join(', ')}</div>` : ''}
       <div class="form-grid-2">
         <div class="field"><label>Nome</label><input type="text" value="${esc(row.nome)}" data-action="impulsa-lote-row-field" data-idx="${i}" data-field="nome"></div>
-        <div class="field"><label>CPF/CNPJ</label><input type="text" value="${esc(row.documento)}" data-action="impulsa-lote-row-field" data-idx="${i}" data-field="documento"></div>
+        <div class="field"><label>CPF/CNPJ</label><input type="text" value="${esc(formatDocumentoDisplay(row.documento))}" data-action="impulsa-lote-row-field" data-idx="${i}" data-field="documento"></div>
       </div>
       <div class="form-grid-2">
         <div class="field">
           <label>Volume (R$)</label>
-          <input type="text" inputmode="decimal" value="${esc(row.volume)}" data-action="impulsa-lote-row-field" data-idx="${i}" data-field="volume">
+          <input type="text" inputmode="decimal" value="${esc(formatThousands(row.volume))}" data-action="impulsa-lote-row-field" data-idx="${i}" data-field="volume">
           ${volume > IMPULSA_VOLUME_LIMIT ? `<div style="color:var(--red);font-size:11px;margin-top:4px;">Acima de ${fmtBRL(IMPULSA_VOLUME_LIMIT)} não pode ser enviado em lote — remova esta linha e crie uma solicitação Individual com Balanço e DRE.</div>` : ''}
         </div>
         <div class="field"><label>Telefone (opcional)</label><input type="text" value="${esc(row.telefone)}" data-action="impulsa-lote-row-field" data-idx="${i}" data-field="telefone"></div>
@@ -1988,7 +2031,7 @@ function NovaSolicitacaoModal(draft) {
       <div class="form-grid-2">
         <div class="field">
           <label>CPF ou CNPJ</label>
-          <input type="text" placeholder="000.000.000-00 ou 00.000.000/0000-00" value="${esc(draft.documento)}" data-action="draft-field" data-field="documento">
+          <input type="text" placeholder="000.000.000-00 ou 00.000.000/0000-00" value="${esc(formatDocumentoDisplay(draft.documento))}" data-action="draft-field" data-field="documento">
           ${docInvalid ? '<div style="color:var(--red);font-size:11.5px;margin-top:6px;">CPF/CNPJ inválido — confira os números digitados.</div>' : ''}
         </div>
         <div class="field"><label>Telefone</label><input type="text" placeholder="(00) 00000-0000" value="${esc(draft.telefone)}" data-action="draft-field" data-field="telefone"></div>
@@ -2073,7 +2116,7 @@ function NovaSolicitacaoModal(draft) {
             <div class="section-label">Dados do Emitente ${i + 1}</div>
             <div class="field"><label>Nome do Emitente</label><input type="text" value="${esc(em.nome)}" data-action="draft-emitente-field" data-idx="${i}" data-field="nome"></div>
             <div class="form-grid-2">
-              <div class="field"><label>CPF do Emitente</label><input type="text" value="${esc(em.cpf)}" data-action="draft-emitente-field" data-idx="${i}" data-field="cpf"></div>
+              <div class="field"><label>CPF do Emitente</label><input type="text" value="${esc(formatDocumentoDisplay(em.cpf))}" data-action="draft-emitente-field" data-idx="${i}" data-field="cpf"></div>
               <div class="field"><label>E-mail do Emitente</label><input type="text" inputmode="email" value="${esc(em.email)}" data-action="draft-emitente-field" data-idx="${i}" data-field="email"></div>
             </div>
             <div class="form-grid-2">
@@ -2624,15 +2667,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const el = e.target;
     if (el.dataset.action === 'admin-search') { ui.admin.search = el.value; focusPreservingRender(renderPartial); }
     if (el.dataset.action === 'partner-search') { ui.partner.search = el.value; focusPreservingRender(renderPartial); }
-    if (el.dataset.action === 'draft-field') { ui.modal.draft[el.dataset.field] = el.value; focusPreservingRender(renderModal); }
+    if (el.dataset.action === 'draft-field') {
+      if (el.dataset.field === 'documento') ui.modal.draft.documento = applyDigitMask(el, formatDocumentoDisplay);
+      else if (el.dataset.field === 'impulsaVolume') ui.modal.draft.impulsaVolume = applyDigitMask(el, formatThousands);
+      else ui.modal.draft[el.dataset.field] = el.value;
+      focusPreservingRender(renderModal);
+    }
     if (el.dataset.action === 'draft-emitente-field') {
       const idx = parseInt(el.dataset.idx, 10);
-      ui.modal.draft.emitentes[idx][el.dataset.field] = el.value;
+      if (el.dataset.field === 'cpf') ui.modal.draft.emitentes[idx].cpf = applyDigitMask(el, formatDocumentoDisplay);
+      else ui.modal.draft.emitentes[idx][el.dataset.field] = el.value;
       focusPreservingRender(renderModal);
     }
     if (el.dataset.action === 'draft-socio-field') {
       const idx = parseInt(el.dataset.idx, 10);
-      ui.modal.draft.socios[idx][el.dataset.field] = el.value;
+      if (el.dataset.field === 'cpf') ui.modal.draft.socios[idx].cpf = applyDigitMask(el, formatDocumentoDisplay);
+      else ui.modal.draft.socios[idx][el.dataset.field] = el.value;
       focusPreservingRender(renderModal);
     }
     if (el.dataset.action === 'commission-field') {
@@ -2640,7 +2690,11 @@ document.addEventListener('DOMContentLoaded', () => {
       focusPreservingRender(renderPartial);
     }
     if (el.dataset.action === 'partner-edit-field') {
-      if (ui.partner.editDraft) ui.partner.editDraft[el.dataset.field] = el.value;
+      if (ui.partner.editDraft) {
+        if (el.dataset.field === 'documento') ui.partner.editDraft.documento = applyDigitMask(el, formatDocumentoDisplay);
+        else if (el.dataset.field === 'impulsaVolume') ui.partner.editDraft.impulsaVolume = applyDigitMask(el, formatThousands);
+        else ui.partner.editDraft[el.dataset.field] = el.value;
+      }
       focusPreservingRender(renderPartial);
     }
     if (el.dataset.action === 'confina-planilha-field') {
@@ -2667,7 +2721,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (el.dataset.action === 'impulsa-lote-row-field') {
       const idx = parseInt(el.dataset.idx, 10);
-      ui.modal.draft.impulsaLoteRows[idx][el.dataset.field] = el.value;
+      if (el.dataset.field === 'documento') ui.modal.draft.impulsaLoteRows[idx].documento = applyDigitMask(el, formatDocumentoDisplay);
+      else if (el.dataset.field === 'volume') ui.modal.draft.impulsaLoteRows[idx].volume = applyDigitMask(el, formatThousands);
+      else ui.modal.draft.impulsaLoteRows[idx][el.dataset.field] = el.value;
       focusPreservingRender(renderModal);
     }
   });
