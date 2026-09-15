@@ -1843,7 +1843,16 @@ function ImpulsaIndividualFields(draft, uploadSlot) {
   const volume = Number(draft.impulsaVolume) || 0;
   const docDigits = (draft.documento || '').replace(/\D/g, '');
   const docInvalid = (docDigits.length === 11 || docDigits.length === 14) && !isValidDocumento(draft.documento);
+  const acima = draft.impulsaFaixa === 'acima' || volume > IMPULSA_VOLUME_LIMIT;
   return `
+    <div class="section-divider"></div>
+    <div class="section-label">Faixa da Solicitação</div>
+    <div class="field">
+      <div class="radio-row">
+        <label><input type="radio" name="ns-impulsa-faixa" value="ate" data-action="draft-field" data-field="impulsaFaixa" ${draft.impulsaFaixa === 'ate' ? 'checked' : ''}> Até R$ 2.000.000</label>
+        <label><input type="radio" name="ns-impulsa-faixa" value="acima" data-action="draft-field" data-field="impulsaFaixa" ${draft.impulsaFaixa === 'acima' ? 'checked' : ''}> Acima de R$ 2.000.000</label>
+      </div>
+    </div>
     <div class="section-divider"></div>
     <div class="section-label">Dados do Cliente</div>
     <div class="field"><label>Nome do Cliente ou Razão Social</label><input type="text" value="${esc(draft.nome)}" data-action="draft-field" data-field="nome"></div>
@@ -1863,7 +1872,7 @@ function ImpulsaIndividualFields(draft, uploadSlot) {
       <div class="field"><label>Telefone <span style="font-weight:500;text-transform:none;color:var(--muted);">(opcional)</span></label><input type="text" placeholder="(00) 00000-0000" value="${esc(draft.telefone)}" data-action="draft-field" data-field="telefone"></div>
       <div class="field"><label>E-mail <span style="font-weight:500;text-transform:none;color:var(--muted);">(opcional)</span></label><input type="text" inputmode="email" placeholder="email@exemplo.com" value="${esc(draft.email)}" data-action="draft-field" data-field="email"></div>
     </div>
-    ${volume > IMPULSA_VOLUME_LIMIT ? `
+    ${acima ? `
       <div class="section-divider"></div>
       <div class="section-label">Documentos Financeiros (obrigatório acima de R$ 2 milhões)</div>
       ${uploadSlot('impulsa_balanco_2025', 'Balanço 2025', draft.docs, '', draft.uploading.impulsa_balanco_2025)}
@@ -2209,7 +2218,7 @@ function emptyDraft() {
     possuiAvalista: '', certidaoPFPJ: '', numeroEmitentes: '',
     temConjugeAvalista: '', conjugeProfissao: '', conjugeContato: '',
     dadosBancarios: '', enderecoFazenda: '', nacionalidade: '',
-    impulsaModelo: '', impulsaVolume: '', impulsaHistorico: '', impulsaLoteRows: [], impulsaLoteFileName: '',
+    impulsaModelo: '', impulsaFaixa: '', impulsaVolume: '', impulsaHistorico: '', impulsaLoteRows: [], impulsaLoteFileName: '',
     confinaPlanilha: emptyConfinaPlanilha(), visitaRelatorio: emptyVisitaRelatorio(),
     faturamento: emptyFaturamento(), endividamentoPatrimonio: emptyEndividamentoPatrimonio(),
     bensImoveis: '', bensAplicacoes: '', bensParticipacoes: '', bensOutros: '', dividaPF: '',
